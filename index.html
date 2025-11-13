@@ -74,6 +74,13 @@
             </label>
         </div>
 
+        <!-- Control de Frecuencia de Muestreo -->
+        <div class="sampling-control">
+            <label for="samplingRate">Frecuencia:</label>
+            <input type="range" id="samplingRate" min="5" max="60" value="30" step="5">
+            <span id="samplingRateValue">30 Hz</span>
+        </div>
+
         <!-- Gráfica Temporal (Chart.js) -->
         <div class="chart-container">
             <canvas id="chart"></canvas>

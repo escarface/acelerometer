@@ -219,6 +219,8 @@ const toggleY = document.getElementById('toggleY');
 const toggleZ = document.getElementById('toggleZ');
 const repCountEl = document.getElementById('repCount');
 const repPhaseEl = document.getElementById('repPhase');
+const samplingRateSlider = document.getElementById('samplingRate');
+const samplingRateValueEl = document.getElementById('samplingRateValue');
 
 // Variables de estado
 let isRunning = false;
@@ -229,6 +231,10 @@ let qualityGauge = null;
 // Instancias de detección
 let zFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
+
+// Control de frecuencia de muestreo
+let samplingInterval = 33; // ms (30 Hz por defecto)
+let lastSampleTime = 0;
 
 // Configuración de datos
 const MAX_DATA_POINTS = 100;
@@ -516,6 +522,13 @@ function updateQualityGauge(quality) {
 function handleMotion(event) {
     if (!isRunning) return;
 
+    // Throttling basado en tiempo
+    const now = Date.now();
+    if (now - lastSampleTime < samplingInterval) {
+        return; // Ignorar este evento
+    }
+    lastSampleTime = now;
+
     // Log solo la primera vez para debug
     if (dataPoints.labels.length === 0) {
         console.log('Primer evento devicemotion recibido:', event);
@@ -682,6 +695,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     toggleZ.addEventListener('change', (e) => {
         toggleAxisVisibility(2, e.target.checked);
+    });
+
+    // Event listener para control de frecuencia de muestreo
+    samplingRateSlider.addEventListener('input', (e) => {
+        const hz = parseInt(e.target.value);
+        samplingInterval = 1000 / hz; // Convertir Hz a ms
+        samplingRateValueEl.textContent = hz + ' Hz';
+        console.log('Frecuencia de muestreo ajustada a', hz, 'Hz (', samplingInterval.toFixed(1), 'ms )');
     });
 
     // Registrar Service Worker

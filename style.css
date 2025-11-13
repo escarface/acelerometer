@@ -236,6 +236,61 @@ h1 {
     text-decoration: line-through;
 }
 
+/* Control de Frecuencia de Muestreo */
+.sampling-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 10px;
+}
+
+.sampling-control label {
+    font-weight: 600;
+    font-size: 14px;
+    color: #2c3e50;
+}
+
+#samplingRate {
+    flex: 1;
+    max-width: 200px;
+    height: 6px;
+    border-radius: 5px;
+    background: #ddd;
+    outline: none;
+    cursor: pointer;
+}
+
+#samplingRate::-webkit-slider-thumb {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+#samplingRate::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+#samplingRateValue {
+    font-weight: 700;
+    color: #667eea;
+    min-width: 55px;
+    font-size: 14px;
+}
+
 .chart-container {
     background: #f8f9fa;
     border-radius: 15px;
