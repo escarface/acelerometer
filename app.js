@@ -227,7 +227,7 @@ let intensityGauge = null;
 let qualityGauge = null;
 
 // Instancias de detección
-let zFilter = new MovingAverageFilter(5);
+let yFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
 
 // Control de frecuencia de muestreo
@@ -499,13 +499,13 @@ function updatePhase(phase) {
 }
 
 // Actualizar gauge de intensidad
-function updateIntensityGauge(zValue) {
+function updateIntensityGauge(yValue) {
     if (!intensityGauge) return;
 
-    // Mapear valor de Z (-3 a 3) a porcentaje (0-100)
+    // Mapear valor de Y (-3 a 3) a porcentaje (0-100)
     // Usamos el valor absoluto para mostrar intensidad sin importar dirección
-    const absZ = Math.abs(zValue);
-    const percentage = Math.min(100, (absZ / 3) * 100);
+    const absY = Math.abs(yValue);
+    const percentage = Math.min(100, (absY / 3) * 100);
 
     intensityGauge.updateSeries([percentage]);
 }
@@ -569,22 +569,22 @@ function processAccelerationData(x, y, z) {
     // Actualizar gráfica temporal
     updateChart(x, y, z);
 
-    // Aplicar filtro de suavizado al eje Z
-    const smoothedZ = zFilter.addValue(z);
+    // Aplicar filtro de suavizado al eje Y (vertical en orientación portrait)
+    const smoothedY = yFilter.addValue(y);
 
     // Debug: mostrar valores (comentar cuando no sea necesario)
     if (dataPoints.labels.length % 20 === 0) { // Log cada 20 muestras
-        console.log('Z raw:', z.toFixed(2), 'Z smoothed:', smoothedZ.toFixed(2));
+        console.log('Y raw:', y.toFixed(2), 'Y smoothed:', smoothedY.toFixed(2));
     }
 
     // Procesar detección de repeticiones
     const timestamp = Date.now();
-    const repResult = repDetector.processAcceleration(smoothedZ, timestamp);
+    const repResult = repDetector.processAcceleration(smoothedY, timestamp);
 
     // Actualizar UI con resultados
     updateRepCounter(repResult.repCount);
     updatePhase(repDetector.getPhaseText());
-    updateIntensityGauge(smoothedZ);
+    updateIntensityGauge(smoothedY);
 
     // Actualizar calidad solo cuando hay una calidad válida
     if (repResult.quality > 0) {
@@ -633,7 +633,7 @@ async function toggleMonitoring() {
         if (!hasPermission) return;
 
         // Resetear detectores
-        zFilter.reset();
+        yFilter.reset();
         repDetector.reset();
         updateRepCounter(0);
         updatePhase('Listo');
