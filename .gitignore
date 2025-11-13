@@ -1,0 +1,13 @@
+# Claude Code files
+.claude.json
+.claude.json.backup
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo

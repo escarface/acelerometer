@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2c3e50">
+    <title>Acelerómetro App</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Acelerómetro</h1>
+            <button id="startBtn" class="start-btn">Iniciar</button>
+        </header>
+
+        <div class="values-container">
+            <div class="axis-value">
+                <span class="axis-label x-axis">X</span>
+                <span class="value" id="xValue">0.00</span>
+                <span class="unit">m/s²</span>
+            </div>
+            <div class="axis-value">
+                <span class="axis-label y-axis">Y</span>
+                <span class="value" id="yValue">0.00</span>
+                <span class="unit">m/s²</span>
+            </div>
+            <div class="axis-value">
+                <span class="axis-label z-axis">Z</span>
+                <span class="value" id="zValue">0.00</span>
+                <span class="unit">m/s²</span>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="chart"></canvas>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
