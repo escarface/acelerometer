@@ -628,10 +628,12 @@ function detectVerticalAxis() {
                 const avgZ = samples.z.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
 
                 // El eje con mayor gravedad es el vertical
-                let verticalAxis = 'y'; // Default
-                if (avgX > avgY && avgX > avgZ) {
+                let verticalAxis;
+                if (avgX >= avgY && avgX >= avgZ) {
                     verticalAxis = 'x';
-                } else if (avgZ > avgX && avgZ > avgY) {
+                } else if (avgY >= avgX && avgY >= avgZ) {
+                    verticalAxis = 'y';
+                } else {
                     verticalAxis = 'z';
                 }
 
