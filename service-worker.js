@@ -1,4 +1,4 @@
-const CACHE_NAME = 'accelerometer-app-v2';
+const CACHE_NAME = 'accelerometer-app-v3';
 const urlsToCache = [
   '/',
   '/index.html',

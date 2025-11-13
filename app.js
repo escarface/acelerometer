@@ -5,6 +5,9 @@ const yValue = document.getElementById('yValue');
 const zValue = document.getElementById('zValue');
 const status = document.getElementById('status');
 const chartCanvas = document.getElementById('chart');
+const toggleX = document.getElementById('toggleX');
+const toggleY = document.getElementById('toggleY');
+const toggleZ = document.getElementById('toggleZ');
 
 // Variables de estado
 let isRunning = false;
@@ -107,6 +110,14 @@ function updateChart(x, y, z) {
 
     if (chart) {
         chart.update('none'); // 'none' mode para mejor rendimiento
+    }
+}
+
+// Controlar visibilidad de ejes en la gráfica
+function toggleAxisVisibility(axisIndex, isVisible) {
+    if (chart) {
+        chart.data.datasets[axisIndex].hidden = !isVisible;
+        chart.update();
     }
 }
 
@@ -231,6 +242,19 @@ async function toggleMonitoring() {
 document.addEventListener('DOMContentLoaded', () => {
     initChart();
     startBtn.addEventListener('click', toggleMonitoring);
+
+    // Event listeners para los toggles de ejes
+    toggleX.addEventListener('change', (e) => {
+        toggleAxisVisibility(0, e.target.checked);
+    });
+
+    toggleY.addEventListener('change', (e) => {
+        toggleAxisVisibility(1, e.target.checked);
+    });
+
+    toggleZ.addEventListener('change', (e) => {
+        toggleAxisVisibility(2, e.target.checked);
+    });
 
     // Registrar Service Worker
     if ('serviceWorker' in navigator) {
