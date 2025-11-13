@@ -1,11 +1,12 @@
-const CACHE_NAME = 'accelerometer-app-v3';
+const CACHE_NAME = 'accelerometer-app-v4';
 const urlsToCache = [
   '/',
   '/index.html',
   '/style.css',
   '/app.js',
   '/manifest.json',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js'
 ];
 
 // Instalación - cachear recursos

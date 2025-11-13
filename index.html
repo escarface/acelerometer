@@ -4,17 +4,42 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#2c3e50">
-    <title>Acelerómetro App</title>
+    <title>Training Tracker</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Acelerómetro</h1>
+            <h1>Training Tracker</h1>
             <button id="startBtn" class="start-btn">Iniciar</button>
         </header>
 
+        <!-- Contador de Reps y Fase -->
+        <div class="rep-counter-container">
+            <div class="rep-count">
+                <div class="rep-number" id="repCount">0</div>
+                <div class="rep-label">Repeticiones</div>
+            </div>
+            <div class="rep-phase" id="repPhase">Listo</div>
+        </div>
+
+        <!-- Grid de Visualizaciones -->
+        <div class="visualizations-grid">
+            <!-- Gauge de Intensidad -->
+            <div class="gauge-container">
+                <h3 class="gauge-title">Intensidad</h3>
+                <div id="intensityGauge"></div>
+            </div>
+
+            <!-- Indicador de Calidad -->
+            <div class="gauge-container">
+                <h3 class="gauge-title">Calidad</h3>
+                <div id="qualityGauge"></div>
+            </div>
+        </div>
+
+        <!-- Valores de Ejes (más compactos) -->
         <div class="values-container">
             <div class="axis-value">
                 <span class="axis-label x-axis">X</span>
@@ -33,6 +58,7 @@
             </div>
         </div>
 
+        <!-- Controles de Ejes -->
         <div class="axis-controls">
             <label class="axis-toggle">
                 <input type="checkbox" id="toggleX" checked>
@@ -48,6 +74,7 @@
             </label>
         </div>
 
+        <!-- Gráfica Temporal (Chart.js) -->
         <div class="chart-container">
             <canvas id="chart"></canvas>
         </div>
@@ -55,7 +82,9 @@
         <div id="status" class="status"></div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

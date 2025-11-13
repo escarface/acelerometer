@@ -77,3 +77,4 @@ const CACHE_NAME = 'accelerometer-app-v2'; // Increment version
 - **iOS Permissions**: iOS 13+ requires explicit permission via `DeviceMotionEvent.requestPermission()`
 - **Browser Support**: Not all browsers/devices support accelerometer access
 - **CDN Dependency**: Chart.js is loaded from CDN (https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js)
+- to memorize
