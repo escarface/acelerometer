@@ -43,12 +43,12 @@ class RepDetector {
 
         // Umbrales de detección (ajustables según calibración)
         this.thresholds = {
-            upwardAcceleration: 2.0,      // m/s² para detectar inicio de subida
-            downwardAcceleration: -1.5,   // m/s² para detectar inicio de bajada
-            minPeakValue: 1.0,            // valor mínimo en el pico
+            upwardAcceleration: 0.8,      // m/s² para detectar inicio de subida
+            downwardAcceleration: -0.6,   // m/s² para detectar inicio de bajada
+            minPeakValue: 0.4,            // valor mínimo en el pico
             minRepDuration: 800,          // ms - duración mínima de una rep
             maxRepDuration: 5000,         // ms - duración máxima de una rep
-            stableThreshold: 0.8          // umbral para considerar posición estable
+            stableThreshold: 0.3          // umbral para considerar posición estable
         };
 
         this.lastQuality = 0;
@@ -155,18 +155,18 @@ class RepDetector {
 
         // Penalizar si el rango de movimiento es pequeño
         const range = this.currentRepData.maxZ - this.currentRepData.minZ;
-        if (range < 3.0) {
+        if (range < 1.0) {
             quality -= 20;
-        } else if (range < 5.0) {
+        } else if (range < 1.5) {
             quality -= 10;
         }
 
         // Calcular suavidad del movimiento (menor varianza = mejor)
         if (this.currentRepData.zValues.length > 2) {
             const variance = this.calculateVariance(this.currentRepData.zValues);
-            if (variance > 4.0) {
+            if (variance > 1.5) {
                 quality -= 15;
-            } else if (variance > 2.0) {
+            } else if (variance > 0.8) {
                 quality -= 8;
             }
         }
@@ -498,10 +498,10 @@ function updatePhase(phase) {
 function updateIntensityGauge(zValue) {
     if (!intensityGauge) return;
 
-    // Mapear valor de Z (-10 a 10) a porcentaje (0-100)
+    // Mapear valor de Z (-3 a 3) a porcentaje (0-100)
     // Usamos el valor absoluto para mostrar intensidad sin importar dirección
     const absZ = Math.abs(zValue);
-    const percentage = Math.min(100, (absZ / 10) * 100);
+    const percentage = Math.min(100, (absZ / 3) * 100);
 
     intensityGauge.updateSeries([percentage]);
 }
@@ -560,6 +560,11 @@ function processAccelerationData(x, y, z) {
 
     // Aplicar filtro de suavizado al eje Z
     const smoothedZ = zFilter.addValue(z);
+
+    // Debug: mostrar valores (comentar cuando no sea necesario)
+    if (dataPoints.labels.length % 20 === 0) { // Log cada 20 muestras
+        console.log('Z raw:', z.toFixed(2), 'Z smoothed:', smoothedZ.toFixed(2));
+    }
 
     // Procesar detección de repeticiones
     const timestamp = Date.now();
