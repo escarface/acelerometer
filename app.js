@@ -227,8 +227,9 @@ let intensityGauge = null;
 let qualityGauge = null;
 
 // Instancias de detección
-let yFilter = new MovingAverageFilter(5);
+let axisFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
+let detectedAxis = 'y'; // Eje vertical detectado: 'x', 'y', o 'z'
 
 // Control de frecuencia de muestreo
 let samplingInterval = 33; // ms (30 Hz por defecto)
@@ -499,13 +500,13 @@ function updatePhase(phase) {
 }
 
 // Actualizar gauge de intensidad
-function updateIntensityGauge(yValue) {
+function updateIntensityGauge(axisValue) {
     if (!intensityGauge) return;
 
-    // Mapear valor de Y (-3 a 3) a porcentaje (0-100)
+    // Mapear valor del eje (-3 a 3) a porcentaje (0-100)
     // Usamos el valor absoluto para mostrar intensidad sin importar dirección
-    const absY = Math.abs(yValue);
-    const percentage = Math.min(100, (absY / 3) * 100);
+    const absValue = Math.abs(axisValue);
+    const percentage = Math.min(100, (absValue / 3) * 100);
 
     intensityGauge.updateSeries([percentage]);
 }
@@ -569,27 +570,88 @@ function processAccelerationData(x, y, z) {
     // Actualizar gráfica temporal
     updateChart(x, y, z);
 
-    // Aplicar filtro de suavizado al eje Y (vertical en orientación portrait)
-    const smoothedY = yFilter.addValue(y);
+    // Seleccionar valor del eje detectado como vertical
+    let axisValue;
+    switch(detectedAxis) {
+        case 'x': axisValue = x; break;
+        case 'y': axisValue = y; break;
+        case 'z': axisValue = z; break;
+        default: axisValue = y;
+    }
 
-    // Debug: mostrar valores (comentar cuando no sea necesario)
-    if (dataPoints.labels.length % 20 === 0) { // Log cada 20 muestras
-        console.log('Y raw:', y.toFixed(2), 'Y smoothed:', smoothedY.toFixed(2));
+    // Aplicar filtro de suavizado
+    const smoothed = axisFilter.addValue(axisValue);
+
+    // Debug: mostrar valores
+    if (dataPoints.labels.length % 20 === 0) {
+        console.log(`${detectedAxis.toUpperCase()} raw:`, axisValue.toFixed(2), 'smoothed:', smoothed.toFixed(2));
     }
 
     // Procesar detección de repeticiones
     const timestamp = Date.now();
-    const repResult = repDetector.processAcceleration(smoothedY, timestamp);
+    const repResult = repDetector.processAcceleration(smoothed, timestamp);
 
     // Actualizar UI con resultados
     updateRepCounter(repResult.repCount);
     updatePhase(repDetector.getPhaseText());
-    updateIntensityGauge(smoothedY);
+    updateIntensityGauge(smoothed);
 
     // Actualizar calidad solo cuando hay una calidad válida
     if (repResult.quality > 0) {
         updateQualityGauge(repResult.quality);
     }
+}
+
+// Detectar eje vertical automáticamente usando gravedad
+function detectVerticalAxis() {
+    return new Promise((resolve) => {
+        let samplesCollected = 0;
+        const samples = { x: [], y: [], z: [] };
+        const SAMPLES_NEEDED = 5;
+
+        const handler = (event) => {
+            const acc = event.accelerationIncludingGravity;
+            if (!acc || acc.x === null || acc.y === null || acc.z === null) {
+                return;
+            }
+
+            // Recolectar muestras
+            samples.x.push(Math.abs(acc.x));
+            samples.y.push(Math.abs(acc.y));
+            samples.z.push(Math.abs(acc.z));
+            samplesCollected++;
+
+            if (samplesCollected >= SAMPLES_NEEDED) {
+                // Calcular promedios
+                const avgX = samples.x.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+                const avgY = samples.y.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+                const avgZ = samples.z.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+
+                // El eje con mayor gravedad es el vertical
+                let verticalAxis = 'y'; // Default
+                if (avgX > avgY && avgX > avgZ) {
+                    verticalAxis = 'x';
+                } else if (avgZ > avgX && avgZ > avgY) {
+                    verticalAxis = 'z';
+                }
+
+                console.log('Gravedad detectada - X:', avgX.toFixed(2), 'Y:', avgY.toFixed(2), 'Z:', avgZ.toFixed(2));
+                console.log('Eje vertical detectado:', verticalAxis.toUpperCase());
+
+                window.removeEventListener('devicemotion', handler);
+                resolve(verticalAxis);
+            }
+        };
+
+        window.addEventListener('devicemotion', handler);
+
+        // Timeout de seguridad (2 segundos)
+        setTimeout(() => {
+            window.removeEventListener('devicemotion', handler);
+            console.log('Timeout en detección, usando eje Y por defecto');
+            resolve('y');
+        }, 2000);
+    });
 }
 
 // Solicitar permisos (necesario para iOS 13+)
@@ -632,8 +694,13 @@ async function toggleMonitoring() {
         const hasPermission = await requestPermission();
         if (!hasPermission) return;
 
+        // Detectar eje vertical automáticamente
+        status.textContent = 'Detectando orientación...';
+        status.className = 'status';
+        detectedAxis = await detectVerticalAxis();
+
         // Resetear detectores
-        yFilter.reset();
+        axisFilter.reset();
         repDetector.reset();
         updateRepCounter(0);
         updatePhase('Listo');
@@ -643,7 +710,7 @@ async function toggleMonitoring() {
         isRunning = true;
         startBtn.textContent = 'Detener';
         startBtn.classList.add('active');
-        status.textContent = 'Monitoreando...';
+        status.textContent = 'Monitoreando (Eje ' + detectedAxis.toUpperCase() + ')';
         status.className = 'status success';
 
         console.log('Iniciando escucha de eventos devicemotion...');
