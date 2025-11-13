@@ -219,8 +219,6 @@ const toggleY = document.getElementById('toggleY');
 const toggleZ = document.getElementById('toggleZ');
 const repCountEl = document.getElementById('repCount');
 const repPhaseEl = document.getElementById('repPhase');
-const samplingRateSlider = document.getElementById('samplingRate');
-const samplingRateValueEl = document.getElementById('samplingRateValue');
 
 // Variables de estado
 let isRunning = false;
@@ -680,6 +678,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initChart();
     initIntensityGauge();
     initQualityGauge();
+
+    // Obtener referencias a elementos del control de frecuencia
+    const samplingRateSlider = document.getElementById('samplingRate');
+    const samplingRateValueEl = document.getElementById('samplingRateValue');
 
     // Event listener para botón de inicio/detener
     startBtn.addEventListener('click', toggleMonitoring);
