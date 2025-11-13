@@ -603,7 +603,7 @@ function processAccelerationData(x, y, z) {
 }
 
 // Detectar eje vertical automáticamente usando gravedad
-function detectVerticalAxis() {
+function detectVerticalAxis(statusElement) {
     return new Promise((resolve) => {
         let samplesCollected = 0;
         const samples = { x: [], y: [], z: [] };
@@ -621,11 +621,17 @@ function detectVerticalAxis() {
             samples.z.push(Math.abs(acc.z));
             samplesCollected++;
 
+            // Mostrar progreso
+            statusElement.textContent = 'Detectando... (' + samplesCollected + '/' + SAMPLES_NEEDED + ')';
+
             if (samplesCollected >= SAMPLES_NEEDED) {
                 // Calcular promedios
                 const avgX = samples.x.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
                 const avgY = samples.y.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
                 const avgZ = samples.z.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+
+                // Mostrar valores detectados
+                statusElement.textContent = 'X:' + avgX.toFixed(1) + ' Y:' + avgY.toFixed(1) + ' Z:' + avgZ.toFixed(1);
 
                 // El eje con mayor gravedad es el vertical
                 let verticalAxis;
@@ -651,6 +657,7 @@ function detectVerticalAxis() {
         setTimeout(() => {
             window.removeEventListener('devicemotion', handler);
             console.log('Timeout en detección, usando eje Y por defecto');
+            statusElement.textContent = 'Timeout - usando Y por defecto';
             resolve('y');
         }, 2000);
     });
@@ -699,7 +706,14 @@ async function toggleMonitoring() {
         // Detectar eje vertical automáticamente
         status.textContent = 'Detectando orientación...';
         status.className = 'status';
-        detectedAxis = await detectVerticalAxis();
+        detectedAxis = await detectVerticalAxis(status);
+
+        // Mostrar resultado de detección
+        status.textContent = 'Eje detectado: ' + detectedAxis.toUpperCase() + ' ✓';
+        status.className = 'status success';
+
+        // Esperar 2 segundos para que el usuario vea el resultado
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
         // Resetear detectores
         axisFilter.reset();
