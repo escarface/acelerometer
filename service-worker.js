@@ -1,9 +1,9 @@
-const CACHE_NAME = 'accelerometer-app-v5-calibration';
+const CACHE_NAME = 'accelerometer-app-v6-2025-12-13';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/style.css',
-  '/app.js',
+  '/style.css?v=2025-12-13-1',
+  '/app.js?v=2025-12-13-1',
   '/manifest.json',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js'
@@ -17,6 +17,7 @@ self.addEventListener('install', event => {
         console.log('Cache abierto');
         return cache.addAll(urlsToCache);
       })
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -32,7 +33,7 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim())
   );
 });
 
