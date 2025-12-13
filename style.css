@@ -28,11 +28,23 @@ header {
     margin-bottom: 20px;
 }
 
+.header-top {
+    margin-bottom: 15px;
+}
+
 h1 {
     color: #2c3e50;
     font-size: 26px;
-    margin-bottom: 12px;
+    margin-bottom: 0;
 }
+
+.header-controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
 
 .start-btn {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -362,12 +374,6 @@ h1 {
 }
 
 /* ========== Calibración ========== */
-
-.header-controls {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-}
 
 .calibrate-btn {
     background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
