@@ -54,6 +54,11 @@ class DataLogger {
         const session = {
             startedAt: new Date().toISOString(),
             length: this.current.length,
+            detectedAxis: detectedAxis,
+            calibration: calibratedThresholds ? {
+                thresholds: calibratedThresholds,
+                date: localStorage.getItem('calibrationDate')
+            } : null,
             data: this.current
         };
         try {
@@ -598,11 +603,11 @@ let samplingInterval = 33;
 let lastSampleTime = 0;
 
 let cadenceEstimator = new FFTCadenceEstimator({
-    fftSize: 256,
+    fftSize: 128,
     sampleRateHz: Math.round(1000 / samplingInterval),
     fMinHz: 0.2,
     fMaxHz: 5.0,
-    updateEvery: 6,
+    updateEvery: 4,
     smoothingAlpha: 0.35
 });
 
