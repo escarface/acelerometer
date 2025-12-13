@@ -1145,26 +1145,6 @@ document.addEventListener('DOMContentLoaded', () => {
         status.className = 'status success';
     });
 
-    // Event listener para botón de calibración
-    calibrateBtn.addEventListener('click', startCalibration);
-
-    // Event listeners para controles del panel de calibración
-    closeCalibrateBtn.addEventListener('click', () => {
-        isCalibrating = false;
-        isRunning = false;
-        window.removeEventListener('devicemotion', handleMotionCalibration);
-        hideCalibrationPanel();
-        startBtn.textContent = 'Iniciar';
-        startBtn.classList.remove('active');
-        status.textContent = 'Calibración cancelada';
-        status.className = 'status';
-    });
-
-    applyCalibrateBtn.addEventListener('click', () => {
-        hideCalibrationPanel();
-        status.textContent = 'Umbrales aplicados. Presiona Iniciar para empezar.';
-        status.className = 'status success';
-    });
 
     // Event listeners para los toggles de ejes
     toggleX.addEventListener('change', (e) => {
