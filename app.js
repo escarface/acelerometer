@@ -58,17 +58,25 @@ class FFTCadenceEstimator {
 
         this._fft = null;
         this._out = null;
+        this._fftAvailable = false;
         this._ensureFft();
     }
 
     _ensureFft() {
         if (this._fft) return;
-        if (typeof FFT === 'undefined') {
-            console.warn('FFTCadenceEstimator: FFT (fft.js) no está cargado.');
-            return;
+        try {
+            if (typeof FFT === 'undefined') {
+                console.warn('FFTCadenceEstimator: FFT (fft.js) no está cargado.');
+                this._fftAvailable = false;
+                return;
+            }
+            this._fft = new FFT(this.fftSize);
+            this._out = this._fft.createComplexArray();
+            this._fftAvailable = true;
+        } catch (error) {
+            console.error('Error inicializando FFT:', error);
+            this._fftAvailable = false;
         }
-        this._fft = new FFT(this.fftSize);
-        this._out = this._fft.createComplexArray();
     }
 
     _createHannWindow(n) {
@@ -94,7 +102,11 @@ class FFTCadenceEstimator {
     }
 
     addSample(value) {
-        this._ensureFft();
+        // Si FFT no está disponible, retornar null silenciosamente
+        if (!this._fftAvailable) {
+            this._ensureFft(); // Reintentar una vez
+            if (!this._fftAvailable) return null;
+        }
 
         this._ring[this._index] = value;
         this._index = (this._index + 1) % this.fftSize;
@@ -475,7 +487,7 @@ const toggleY = document.getElementById('toggleY');
 const toggleZ = document.getElementById('toggleZ');
 const repCountEl = document.getElementById('repCount');
 const repPhaseEl = document.getElementById('repPhase');
-const cadenceValueEl = document.getElementById('cadenceValue');
+let cadenceValueEl = null;
 
 // Elementos del panel de calibración
 const calibrationPanel = document.getElementById('calibrationPanel');
@@ -937,10 +949,14 @@ function handleMotion(event) {
     const smoothed = axisFilter.addValue(axisValue);
 
     // Estimar cadencia por FFT (mostrar en campo fijo)
-    const cadence = cadenceEstimator.addSample(smoothed);
-    if (cadence && cadenceValueEl) {
-        const rpm = cadence.frequencyHz * 60;
-        cadenceValueEl.textContent = rpm.toFixed(0);
+    try {
+        const cadence = cadenceEstimator.addSample(smoothed);
+        if (cadence && cadenceValueEl) {
+            const rpm = cadence.frequencyHz * 60;
+            cadenceValueEl.textContent = rpm.toFixed(0);
+        }
+    } catch (error) {
+        console.error('Error en cadenceEstimator:', error);
     }
 
     const repResult = repDetector.processAcceleration(smoothed, now);
@@ -1083,6 +1099,9 @@ async function toggleMonitoring() {
 // ========================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Obtener referencia al elemento de cadencia (puede no existir en versiones antiguas)
+    cadenceValueEl = document.getElementById('cadenceValue');
+    
     // Cargar umbrales calibrados
     const savedThresholds = localStorage.getItem('calibratedThresholds');
     if (savedThresholds) {

@@ -1,9 +1,9 @@
-const CACHE_NAME = 'accelerometer-app-v9-cadence-ui';
+const CACHE_NAME = 'accelerometer-app-v10-fft-fix';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/style.css?v=2025-12-13-2',
-  '/app.js?v=2025-12-13-4',
+  '/style.css?v=2025-12-13-3',
+  '/app.js?v=2025-12-13-5',
   '/manifest.json',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js',
