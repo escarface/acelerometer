@@ -1,9 +1,9 @@
-const CACHE_NAME = 'accelerometer-app-v6-2025-12-13';
+const CACHE_NAME = 'accelerometer-app-v7-clean';
 const urlsToCache = [
   '/',
   '/index.html',
   '/style.css?v=2025-12-13-1',
-  '/app.js?v=2025-12-13-1',
+  '/app.js?v=2025-12-13-2',
   '/manifest.json',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js'
