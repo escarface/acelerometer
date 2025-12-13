@@ -35,6 +35,76 @@ class MovingAverageFilter {
     }
 }
 
+// Registro ligero de datos de sesión
+class DataLogger {
+    constructor(maxSessions = 10) {
+        this.isLogging = false;
+        this.current = [];
+        this.sessionsKey = 'tt_sessions';
+        this.maxSessions = maxSessions;
+    }
+
+    start() {
+        this.isLogging = true;
+        this.current = [];
+    }
+
+    stop() {
+        this.isLogging = false;
+        const session = {
+            startedAt: new Date().toISOString(),
+            length: this.current.length,
+            data: this.current
+        };
+        try {
+            const prev = JSON.parse(localStorage.getItem(this.sessionsKey) || '[]');
+            prev.unshift(session);
+            if (prev.length > this.maxSessions) prev.length = this.maxSessions;
+            localStorage.setItem(this.sessionsKey, JSON.stringify(prev));
+            return session;
+        } catch (e) {
+            console.error('Logger persist error', e);
+            return null;
+        }
+    }
+
+    append(entry) {
+        if (!this.isLogging) return;
+        this.current.push(entry);
+    }
+
+    getSessions() {
+        try { return JSON.parse(localStorage.getItem(this.sessionsKey) || '[]'); }
+        catch { return []; }
+    }
+
+    exportJSON() {
+        const blob = new Blob([JSON.stringify(this.getSessions(), null, 2)], { type: 'application/json' });
+        this._downloadBlob(blob, `sessions-${Date.now()}.json`);
+    }
+
+    exportCSV() {
+        const sessions = this.getSessions();
+        const headers = ['timestamp','x','y','z','axis','smoothed','cadenceHz','repCount','phase','quality'];
+        let lines = [headers.join(',')];
+        for (const s of sessions) {
+            for (const r of s.data) {
+                const row = [r.timestamp,r.x,r.y,r.z,r.axis,r.smoothed,(r.cadenceHz ?? ''),r.repCount,r.phase,(r.quality ?? '')];
+                lines.push(row.join(','));
+            }
+        }
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        this._downloadBlob(blob, `sessions-${Date.now()}.csv`);
+    }
+
+    _downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+}
+
 // Estimador de frecuencia dominante (cadencia) usando fft.js
 // Requiere que exista el global `FFT` (cargado por CDN en index.html)
 class FFTCadenceEstimator {
@@ -510,6 +580,11 @@ let isCalibrating = false;
 let chart = null;
 let intensityGauge = null;
 let qualityGauge = null;
+let dataLogger = new DataLogger();
+const logStartBtn = document.getElementById('logStartBtn');
+const logStopBtn = document.getElementById('logStopBtn');
+const exportJsonBtn = document.getElementById('exportJsonBtn');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
 
 let axisFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
@@ -968,6 +1043,18 @@ function handleMotion(event) {
     if (repResult.quality > 0) {
         updateQualityGauge(repResult.quality);
     }
+
+    // Logging
+    dataLogger.append({
+        timestamp: now,
+        x, y, z,
+        axis: detectedAxis,
+        smoothed,
+        cadenceHz: cadenceEstimator.lastFrequencyHz || null,
+        repCount: repResult.repCount,
+        phase: repDetector.getPhaseText(),
+        quality: repResult.quality || null
+    });
 }
 
 function detectVerticalAxis(statusElement) {
@@ -1128,6 +1215,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event listeners
     startBtn.addEventListener('click', toggleMonitoring);
     calibrateBtn.addEventListener('click', startCalibration);
+
+    if (logStartBtn) logStartBtn.addEventListener('click', () => {
+        dataLogger.start();
+        status.textContent = 'Registro iniciado';
+    });
+    if (logStopBtn) logStopBtn.addEventListener('click', () => {
+        const session = dataLogger.stop();
+        status.textContent = session ? `Registro guardado (${session.length} muestras)` : 'Registro detenido';
+    });
+    if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => dataLogger.exportJSON());
+    if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => dataLogger.exportCSV());
 
     closeCalibrateBtn.addEventListener('click', () => {
         isCalibrating = false;
