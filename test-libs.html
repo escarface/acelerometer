@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Libraries</title>
+</head>
+<body>
+    <h1>Test de Librerías</h1>
+    <div id="status"></div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fft.js@4.0.4/lib/fft.min.js"></script>
+    <script>
+        const statusDiv = document.getElementById('status');
+        let messages = [];
+        
+        // Test Chart.js
+        if (typeof Chart !== 'undefined') {
+            messages.push('✓ Chart.js cargado correctamente');
+        } else {
+            messages.push('✗ Chart.js NO cargado');
+        }
+        
+        // Test ApexCharts
+        if (typeof ApexCharts !== 'undefined') {
+            messages.push('✓ ApexCharts cargado correctamente');
+        } else {
+            messages.push('✗ ApexCharts NO cargado');
+        }
+        
+        // Test FFT.js
+        if (typeof FFT !== 'undefined') {
+            messages.push('✓ FFT.js cargado correctamente');
+            
+            // Test básico de FFT
+            try {
+                const fft = new FFT(8);
+                const out = fft.createComplexArray();
+                const data = new Float32Array([1, 0, 1, 0, 1, 0, 1, 0]);
+                fft.realTransform(out, data);
+                messages.push('✓ FFT.js funciona correctamente');
+            } catch(e) {
+                messages.push('✗ FFT.js error: ' + e.message);
+            }
+        } else {
+            messages.push('✗ FFT.js NO cargado');
+        }
+        
+        statusDiv.innerHTML = messages.join('<br>');
+        console.log('Test results:', messages);
+    </script>
+</body>
+</html>
