@@ -35,6 +35,87 @@ class MovingAverageFilter {
     }
 }
 
+// Sistema de debug para capturar logs en móvil
+class DebugLogger {
+    constructor(maxLogs = 200) {
+        this.logs = [];
+        this.maxLogs = maxLogs;
+        this.enabled = false;
+        this._originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn
+        };
+    }
+
+    enable() {
+        if (this.enabled) return;
+        this.enabled = true;
+        const self = this;
+        
+        console.log = function(...args) {
+            self._originalConsole.log.apply(console, args);
+            self.add('LOG', args.map(a => String(a)).join(' '));
+        };
+        
+        console.error = function(...args) {
+            self._originalConsole.error.apply(console, args);
+            self.add('ERROR', args.map(a => String(a)).join(' '));
+        };
+        
+        console.warn = function(...args) {
+            self._originalConsole.warn.apply(console, args);
+            self.add('WARN', args.map(a => String(a)).join(' '));
+        };
+        
+        window.addEventListener('error', (e) => {
+            self.add('ERROR', `${e.message} at ${e.filename}:${e.lineno}:${e.colno}`);
+        });
+        
+        window.addEventListener('unhandledrejection', (e) => {
+            self.add('ERROR', `Unhandled promise: ${e.reason}`);
+        });
+    }
+
+    add(level, message) {
+        this.logs.push({
+            timestamp: new Date().toISOString(),
+            level,
+            message
+        });
+        if (this.logs.length > this.maxLogs) {
+            this.logs.shift();
+        }
+        this.updateUI();
+    }
+
+    updateUI() {
+        const panel = document.getElementById('debugLogContent');
+        if (!panel) return;
+        const last10 = this.logs.slice(-10);
+        panel.innerHTML = last10.map(l => 
+            `<div class="log-entry log-${l.level.toLowerCase()}">[${l.timestamp.split('T')[1].split('.')[0]}] ${l.level}: ${l.message}</div>`
+        ).join('');
+        panel.scrollTop = panel.scrollHeight;
+    }
+
+    export() {
+        const text = this.logs.map(l => `[${l.timestamp}] ${l.level}: ${l.message}`).join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `debug-log-${Date.now()}.txt`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    clear() {
+        this.logs = [];
+        this.updateUI();
+    }
+}
+
 // Registro ligero de datos de sesión
 class DataLogger {
     constructor(maxSessions = 10) {
@@ -586,10 +667,15 @@ let chart = null;
 let intensityGauge = null;
 let qualityGauge = null;
 let dataLogger = new DataLogger();
+let debugLogger = new DebugLogger();
 const logStartBtn = document.getElementById('logStartBtn');
 const logStopBtn = document.getElementById('logStopBtn');
 const exportJsonBtn = document.getElementById('exportJsonBtn');
 const exportCsvBtn = document.getElementById('exportCsvBtn');
+const debugToggleBtn = document.getElementById('debugToggleBtn');
+const debugPanel = document.getElementById('debugPanel');
+const debugExportBtn = document.getElementById('debugExportBtn');
+const debugClearBtn = document.getElementById('debugClearBtn');
 
 let axisFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
@@ -1231,6 +1317,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     if (exportJsonBtn) exportJsonBtn.addEventListener('click', () => dataLogger.exportJSON());
     if (exportCsvBtn) exportCsvBtn.addEventListener('click', () => dataLogger.exportCSV());
+    
+    // Debug logger
+    debugLogger.enable();
+    if (debugToggleBtn) debugToggleBtn.addEventListener('click', () => {
+        debugPanel.classList.toggle('hidden');
+    });
+    if (debugExportBtn) debugExportBtn.addEventListener('click', () => debugLogger.export());
+    if (debugClearBtn) debugClearBtn.addEventListener('click', () => debugLogger.clear());
 
     closeCalibrateBtn.addEventListener('click', () => {
         isCalibrating = false;
