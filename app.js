@@ -28,9 +28,141 @@ class MovingAverageFilter {
     }
 }
 
+// Calibrador automático de umbrales
+class AutoCalibrator {
+    constructor() {
+        this.repsData = [];
+        this.isCalibrating = false;
+        this.repCount = 0;
+        this.targetReps = 5;
+        this.currentRepPeaks = {
+            maxZ: -Infinity,
+            minZ: Infinity,
+            zValues: []
+        };
+        this.inRep = false;
+    }
+
+    startCalibration(targetReps = 5) {
+        this.isCalibrating = true;
+        this.repsData = [];
+        this.repCount = 0;
+        this.targetReps = targetReps;
+        this.currentRepPeaks = {
+            maxZ: -Infinity,
+            minZ: Infinity,
+            zValues: []
+        };
+        this.inRep = false;
+    }
+
+    processValue(z) {
+        if (!this.isCalibrating) return null;
+
+        // Detectar si estamos en una repetición (movimiento significativo)
+        if (Math.abs(z) > 0.5 && !this.inRep) {
+            this.inRep = true;
+            this.currentRepPeaks = {
+                maxZ: z,
+                minZ: z,
+                zValues: [z]
+            };
+        } else if (this.inRep) {
+            this.currentRepPeaks.zValues.push(z);
+            this.currentRepPeaks.maxZ = Math.max(this.currentRepPeaks.maxZ, z);
+            this.currentRepPeaks.minZ = Math.min(this.currentRepPeaks.minZ, z);
+
+            // Detectar fin de repetición (vuelta a estable)
+            if (Math.abs(z) < 0.2 && this.currentRepPeaks.zValues.length > 20) {
+                this.repsData.push({
+                    maxZ: this.currentRepPeaks.maxZ,
+                    minZ: this.currentRepPeaks.minZ,
+                    amplitude: this.currentRepPeaks.maxZ - this.currentRepPeaks.minZ,
+                    variance: this.calculateVariance(this.currentRepPeaks.zValues)
+                });
+
+                this.repCount++;
+                this.inRep = false;
+
+                if (this.repCount >= this.targetReps) {
+                    return this.calculateThresholds();
+                }
+
+                return { repCount: this.repCount, targetReps: this.targetReps };
+            }
+        } else if (Math.abs(z) < 0.2) {
+            // Mantener estable
+            this.inRep = false;
+        }
+
+        return { repCount: this.repCount, targetReps: this.targetReps };
+    }
+
+    calculateVariance(values) {
+        if (values.length === 0) return 0;
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
+        return squaredDiffs.reduce((a, b) => a + b, 0) / values.length;
+    }
+
+    calculateThresholds() {
+        if (this.repsData.length === 0) return null;
+
+        // Calcular estadísticas
+        const maxZValues = this.repsData.map(r => r.maxZ);
+        const minZValues = this.repsData.map(r => r.minZ);
+        const amplitudes = this.repsData.map(r => r.amplitude);
+
+        const avgMaxZ = maxZValues.reduce((a, b) => a + b, 0) / maxZValues.length;
+        const avgMinZ = minZValues.reduce((a, b) => a + b, 0) / minZValues.length;
+        const avgAmplitude = amplitudes.reduce((a, b) => a + b, 0) / amplitudes.length;
+
+        // Calcular desviación estándar
+        const stdMaxZ = Math.sqrt(
+            maxZValues.reduce((sum, val) => sum + Math.pow(val - avgMaxZ, 2), 0) / maxZValues.length
+        );
+        const stdMinZ = Math.sqrt(
+            minZValues.reduce((sum, val) => sum + Math.pow(val - avgMinZ, 2), 0) / minZValues.length
+        );
+
+        // Crear nuevos umbrales basados en estadísticas
+        const thresholds = {
+            upwardAcceleration: Math.max(0.5, avgMaxZ - stdMaxZ * 0.5),
+            downwardAcceleration: Math.min(-0.3, avgMinZ + stdMinZ * 0.5),
+            minAmplitude: avgAmplitude * 0.7, // 70% de amplitud promedio
+            minRepDuration: 600,
+            maxRepDuration: 5000,
+            stableThreshold: 0.25
+        };
+
+        this.isCalibrating = false;
+
+        return {
+            success: true,
+            thresholds: thresholds,
+            stats: {
+                repsDetected: this.repsData.length,
+                avgMaxZ,
+                avgMinZ,
+                avgAmplitude,
+                stdMaxZ,
+                stdMinZ
+            }
+        };
+    }
+
+    stopCalibration() {
+        this.isCalibrating = false;
+    }
+
+    getProgress() {
+        return this.targetReps > 0 ? (this.repCount / this.targetReps) * 100 : 0;
+    }
+}
+
 // Detector de repeticiones con máquina de estados
 class RepDetector {
-    constructor() {
+    constructor(customThresholds = null) {
         this.state = 'IDLE'; // IDLE, PULLING_UP, AT_TOP, LOWERING
         this.repCount = 0;
         this.currentRepStartTime = null;
@@ -41,17 +173,27 @@ class RepDetector {
             duration: 0
         };
 
-        // Umbrales de detección (ajustables según calibración)
-        this.thresholds = {
+        // Umbrales por defecto
+        const defaultThresholds = {
             upwardAcceleration: 0.8,      // m/s² para detectar inicio de subida
             downwardAcceleration: -0.6,   // m/s² para detectar inicio de bajada
             minPeakValue: 0.4,            // valor mínimo en el pico
             minRepDuration: 800,          // ms - duración mínima de una rep
             maxRepDuration: 5000,         // ms - duración máxima de una rep
-            stableThreshold: 0.3          // umbral para considerar posición estable
+            stableThreshold: 0.3,         // umbral para considerar posición estable
+            minAmplitude: 1.0             // amplitud mínima
         };
 
+        // Usar umbrales personalizados si se proporcionan
+        this.thresholds = customThresholds ? { ...defaultThresholds, ...customThresholds } : defaultThresholds;
+
         this.lastQuality = 0;
+        this.lastRepTime = 0;
+        this.cooldownPeriod = 300; // ms entre reps para evitar duplicados
+    }
+
+    setThresholds(thresholds) {
+        this.thresholds = { ...this.thresholds, ...thresholds };
     }
 
     processAcceleration(z, timestamp) {
@@ -106,10 +248,16 @@ class RepDetector {
                     // Verificar duración de la rep
                     this.currentRepData.duration = timestamp - this.currentRepStartTime;
 
+                    // Verificar cooldown y validez
+                    const timeSinceLastRep = timestamp - this.lastRepTime;
+                    const amplitude = this.currentRepData.maxZ - this.currentRepData.minZ;
+
                     if (this.currentRepData.duration >= this.thresholds.minRepDuration &&
-                        this.currentRepData.duration <= this.thresholds.maxRepDuration) {
+                        this.currentRepData.duration <= this.thresholds.maxRepDuration &&
+                        amplitude >= this.thresholds.minAmplitude &&
+                        timeSinceLastRep >= this.cooldownPeriod) {
                         // Rep válida completada
-                        this.completeRep();
+                        this.completeRep(timestamp);
                     }
 
                     this.state = 'IDLE';
@@ -124,8 +272,9 @@ class RepDetector {
         };
     }
 
-    completeRep() {
+    completeRep(timestamp) {
         this.repCount++;
+        this.lastRepTime = timestamp;
 
         // Calcular calidad de la repetición
         this.lastQuality = this.calculateRepQuality();
@@ -201,6 +350,7 @@ class RepDetector {
             duration: 0
         };
         this.lastQuality = 0;
+        this.lastRepTime = 0;
     }
 }
 
@@ -209,6 +359,7 @@ class RepDetector {
 // ========================================
 
 const startBtn = document.getElementById('startBtn');
+const calibrateBtn = document.getElementById('calibrateBtn');
 const xValue = document.getElementById('xValue');
 const yValue = document.getElementById('yValue');
 const zValue = document.getElementById('zValue');
@@ -220,8 +371,21 @@ const toggleZ = document.getElementById('toggleZ');
 const repCountEl = document.getElementById('repCount');
 const repPhaseEl = document.getElementById('repPhase');
 
+// Elementos del panel de calibración
+const calibrationPanel = document.getElementById('calibrationPanel');
+const calibrationStatus = document.getElementById('calibrationStatus');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
+const calibrationResults = document.getElementById('calibrationResults');
+const thresholdUp = document.getElementById('thresholdUp');
+const thresholdDown = document.getElementById('thresholdDown');
+const thresholdAmplitude = document.getElementById('thresholdAmplitude');
+const closeCalibrateBtn = document.getElementById('closeCalibrateBtn');
+const applyCalibrateBtn = document.getElementById('applyCalibrateBtn');
+
 // Variables de estado
 let isRunning = false;
+let isCalibrating = false;
 let chart = null;
 let intensityGauge = null;
 let qualityGauge = null;
@@ -229,7 +393,11 @@ let qualityGauge = null;
 // Instancias de detección
 let axisFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
+let autoCalibrator = new AutoCalibrator();
 let detectedAxis = 'y'; // Eje vertical detectado: 'x', 'y', o 'z'
+
+// Umbrales calibrados (almacenados)
+let calibratedThresholds = null;
 
 // Control de frecuencia de muestreo
 let samplingInterval = 33; // ms (30 Hz por defecto)
@@ -686,7 +854,171 @@ async function requestPermission() {
     return true; // No requiere permisos explícitos
 }
 
-// Iniciar/detener monitoreo
+// ========================================
+// FUNCIONES DE CALIBRACIÓN
+// ========================================
+
+function showCalibrationPanel() {
+    calibrationPanel.classList.remove('hidden');
+}
+
+function hideCalibrationPanel() {
+    calibrationPanel.classList.add('hidden');
+}
+
+function updateCalibrationProgress() {
+    const progress = autoCalibrator.getProgress();
+    progressBar.style.width = progress + '%';
+    const repsDetected = autoCalibrator.repCount;
+    const repsTarget = autoCalibrator.targetReps;
+    progressText.textContent = `Repetición ${repsDetected}/${repsTarget} detectada`;
+}
+
+async function startCalibration() {
+    // Verificar soporte
+    if (!window.DeviceMotionEvent) {
+        status.textContent = 'Tu dispositivo no soporta el acelerómetro';
+        status.className = 'status error';
+        return;
+    }
+
+    // Solicitar permisos
+    const hasPermission = await requestPermission();
+    if (!hasPermission) return;
+
+    // Detectar eje vertical automáticamente
+    status.textContent = 'Detectando orientación...';
+    status.className = 'status';
+    detectedAxis = await detectVerticalAxis(status);
+
+    // Mostrar panel de calibración
+    showCalibrationPanel();
+    calibrationStatus.textContent = 'Realiza 5 repeticiones completas para calibrar automáticamente. Presiona Iniciar cuando estés listo.';
+    progressText.textContent = 'Esperando inicio...';
+    calibrationResults.classList.add('hidden');
+    applyCalibrateBtn.classList.add('hidden');
+
+    // Inicializar calibrador
+    autoCalibrator.startCalibration(5);
+
+    // Resetear datos
+    axisFilter.reset();
+    dataPoints.labels = [];
+    dataPoints.x = [];
+    dataPoints.y = [];
+    dataPoints.z = [];
+
+    // Empezar a capturar datos
+    isCalibrating = true;
+    isRunning = true;
+    startBtn.textContent = 'Detener';
+    startBtn.classList.add('active');
+
+    console.log('Iniciando calibración...');
+    window.addEventListener('devicemotion', handleMotionCalibration);
+
+    // Timeout para verificar datos
+    setTimeout(() => {
+        if (dataPoints.labels.length === 0) {
+            calibrationStatus.textContent = 'No se están recibiendo datos del acelerómetro. Verifica los permisos.';
+        }
+    }, 3000);
+}
+
+function handleMotionCalibration(event) {
+    if (!isCalibrating) return;
+
+    // Throttling basado en tiempo
+    const now = Date.now();
+    if (now - lastSampleTime < samplingInterval) {
+        return;
+    }
+    lastSampleTime = now;
+
+    // Obtener datos de aceleración
+    const acc = event.acceleration;
+
+    if (!acc || (acc.x === null && acc.y === null && acc.z === null)) {
+        const accWithGravity = event.accelerationIncludingGravity;
+        if (accWithGravity && (accWithGravity.x !== null || accWithGravity.y !== null || accWithGravity.z !== null)) {
+            const x = accWithGravity.x || 0;
+            const y = accWithGravity.y || 0;
+            const z = accWithGravity.z || 0;
+
+            calibrationProcessData(x, y, z);
+        }
+        return;
+    }
+
+    if (acc && acc.x !== null && acc.y !== null && acc.z !== null) {
+        const x = acc.x || 0;
+        const y = acc.y || 0;
+        const z = acc.z || 0;
+
+        calibrationProcessData(x, y, z);
+    }
+}
+
+function calibrationProcessData(x, y, z) {
+    // Actualizar gráfica
+    updateChart(x, y, z);
+
+    // Seleccionar eje
+    let axisValue;
+    switch(detectedAxis) {
+        case 'x': axisValue = x; break;
+        case 'y': axisValue = y; break;
+        case 'z': axisValue = z; break;
+        default: axisValue = y;
+    }
+
+    // Aplicar filtro
+    const smoothed = axisFilter.addValue(axisValue);
+
+    // Procesar calibración
+    const result = autoCalibrator.processValue(smoothed);
+
+    if (result && result.repCount !== undefined) {
+        updateCalibrationProgress();
+
+        // Si la calibración está completa
+        if (result.thresholds) {
+            completeCalibration(result);
+        }
+    }
+}
+
+function completeCalibration(result) {
+    isCalibrating = false;
+    isRunning = false;
+    window.removeEventListener('devicemotion', handleMotionCalibration);
+
+    // Guardar umbrales calibrados
+    calibratedThresholds = result.thresholds;
+    localStorage.setItem('calibratedThresholds', JSON.stringify(calibratedThresholds));
+    localStorage.setItem('calibrationDate', new Date().toISOString());
+
+    // Mostrar resultados
+    calibrationStatus.textContent = '✓ ¡Calibración completada!';
+    progressBar.style.width = '100%';
+    progressText.textContent = 'Umbrales calibrados correctamente';
+
+    // Mostrar valores de umbrales
+    thresholdUp.textContent = result.thresholds.upwardAcceleration.toFixed(3);
+    thresholdDown.textContent = result.thresholds.downwardAcceleration.toFixed(3);
+    thresholdAmplitude.textContent = result.thresholds.minAmplitude.toFixed(3);
+
+    calibrationResults.classList.remove('hidden');
+    applyCalibrateBtn.classList.remove('hidden');
+
+    console.log('Calibración completada:', result.thresholds);
+}
+
+// ========================================
+// FUNCIONES DE UTILIDAD
+// ========================================
+
+
 async function toggleMonitoring() {
     if (!isRunning) {
         // Verificar soporte
@@ -718,6 +1050,15 @@ async function toggleMonitoring() {
         // Resetear detectores
         axisFilter.reset();
         repDetector.reset();
+
+        // Aplicar umbrales calibrados si existen
+        if (calibratedThresholds) {
+            repDetector.setThresholds(calibratedThresholds);
+            status.textContent = 'Monitoreando con calibración personalizada (Eje ' + detectedAxis.toUpperCase() + ')';
+        } else {
+            status.textContent = 'Monitoreando (Eje ' + detectedAxis.toUpperCase() + ')';
+        }
+
         updateRepCounter(0);
         updatePhase('Listo');
         updateQualityGauge(0);
@@ -757,6 +1098,20 @@ async function toggleMonitoring() {
 // ========================================
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Cargar umbrales calibrados desde localStorage si existen
+    const savedThresholds = localStorage.getItem('calibratedThresholds');
+    if (savedThresholds) {
+        try {
+            calibratedThresholds = JSON.parse(savedThresholds);
+            const calibrationDate = localStorage.getItem('calibrationDate');
+            console.log('Umbrales calibrados cargados. Fecha:', calibrationDate);
+            status.textContent = '✓ Umbrales calibrados cargados';
+            status.className = 'status success';
+        } catch (e) {
+            console.error('Error al cargar umbrales:', e);
+        }
+    }
+
     // Inicializar todas las gráficas
     initChart();
     initIntensityGauge();
@@ -768,6 +1123,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Event listener para botón de inicio/detener
     startBtn.addEventListener('click', toggleMonitoring);
+
+    // Event listener para botón de calibración
+    calibrateBtn.addEventListener('click', startCalibration);
+
+    // Event listeners para controles del panel de calibración
+    closeCalibrateBtn.addEventListener('click', () => {
+        isCalibrating = false;
+        isRunning = false;
+        window.removeEventListener('devicemotion', handleMotionCalibration);
+        hideCalibrationPanel();
+        startBtn.textContent = 'Iniciar';
+        startBtn.classList.remove('active');
+        status.textContent = 'Calibración cancelada';
+        status.className = 'status';
+    });
+
+    applyCalibrateBtn.addEventListener('click', () => {
+        hideCalibrationPanel();
+        status.textContent = 'Umbrales aplicados. Presiona Iniciar para empezar.';
+        status.className = 'status success';
+    });
+
+    // Event listener para botón de calibración
+    calibrateBtn.addEventListener('click', startCalibration);
+
+    // Event listeners para controles del panel de calibración
+    closeCalibrateBtn.addEventListener('click', () => {
+        isCalibrating = false;
+        isRunning = false;
+        window.removeEventListener('devicemotion', handleMotionCalibration);
+        hideCalibrationPanel();
+        startBtn.textContent = 'Iniciar';
+        startBtn.classList.remove('active');
+        status.textContent = 'Calibración cancelada';
+        status.className = 'status';
+    });
+
+    applyCalibrateBtn.addEventListener('click', () => {
+        hideCalibrationPanel();
+        status.textContent = 'Umbrales aplicados. Presiona Iniciar para empezar.';
+        status.className = 'status success';
+    });
 
     // Event listeners para los toggles de ejes
     toggleX.addEventListener('change', (e) => {

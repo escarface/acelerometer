@@ -12,8 +12,46 @@
     <div class="container">
         <header>
             <h1>Training Tracker</h1>
-            <button id="startBtn" class="start-btn">Iniciar</button>
+            <div class="header-controls">
+                <button id="calibrateBtn" class="calibrate-btn" title="Calibrar umbrales automáticamente">🔧 Calibrar</button>
+                <button id="startBtn" class="start-btn">Iniciar</button>
+            </div>
         </header>
+
+        <!-- Panel de Calibración -->
+        <div id="calibrationPanel" class="calibration-panel hidden">
+            <div class="calibration-content">
+                <h2>Calibración Automática</h2>
+                <p id="calibrationStatus">Presiona Iniciar para empezar una serie de calibración con 3-5 repeticiones.</p>
+                <div class="calibration-progress">
+                    <div class="progress-bar">
+                        <div id="progressBar" class="progress-fill"></div>
+                    </div>
+                    <p id="progressText" class="progress-text">Listo para calibrar</p>
+                </div>
+                <div id="calibrationResults" class="calibration-results hidden">
+                    <h3>Umbrales Calibrados</h3>
+                    <div class="threshold-display">
+                        <div class="threshold-item">
+                            <span class="threshold-label">Aceleración hacia arriba:</span>
+                            <span id="thresholdUp" class="threshold-value">-</span>
+                        </div>
+                        <div class="threshold-item">
+                            <span class="threshold-label">Aceleración hacia abajo:</span>
+                            <span id="thresholdDown" class="threshold-value">-</span>
+                        </div>
+                        <div class="threshold-item">
+                            <span class="threshold-label">Amplitud mínima:</span>
+                            <span id="thresholdAmplitude" class="threshold-value">-</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="calibration-actions">
+                    <button id="closeCalibrateBtn" class="secondary-btn">Cerrar</button>
+                    <button id="applyCalibrateBtn" class="secondary-btn hidden">Aplicar Cambios</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Contador de Reps y Fase -->
         <div class="rep-counter-container">
