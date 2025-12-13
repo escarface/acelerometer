@@ -1,11 +1,4 @@
 // ========================================
-// CONFIGURACIÓN Y CONSTANTES
-// ========================================
-
-const MAX_DATA_POINTS = 100;
-const CALIBRATION_TARGET_REPS = 5;
-
-// ========================================
 // CLASES AUXILIARES
 // ========================================
 
@@ -35,209 +28,71 @@ class MovingAverageFilter {
     }
 }
 
-// Estimador de frecuencia dominante (cadencia) usando fft.js
-// Requiere que exista el global `FFT` (cargado por CDN en index.html)
-class FFTCadenceEstimator {
-    constructor({ fftSize = 256, sampleRateHz = 30, fMinHz = 0.2, fMaxHz = 5.0, updateEvery = 6, smoothingAlpha = 0.35 } = {}) {
-        this.fftSize = fftSize;
-        this.sampleRateHz = sampleRateHz;
-        this.fMinHz = fMinHz;
-        this.fMaxHz = fMaxHz;
-        this.updateEvery = Math.max(1, updateEvery);
-        this.smoothingAlpha = Math.min(1, Math.max(0, smoothingAlpha));
-
-        this._index = 0;
-        this._filled = false;
-        this._samplesSeen = 0;
-        this._ring = new Float32Array(this.fftSize);
-        this._timeDomain = new Float32Array(this.fftSize);
-        this._window = this._createHannWindow(this.fftSize);
-
-        this.lastFrequencyHz = 0;
-        this.lastPower = 0;
-
-        this._fft = null;
-        this._out = null;
-        this._ensureFft();
-    }
-
-    _ensureFft() {
-        if (this._fft) return;
-        if (typeof FFT === 'undefined') {
-            console.warn('FFTCadenceEstimator: FFT (fft.js) no está cargado.');
-            return;
-        }
-        this._fft = new FFT(this.fftSize);
-        this._out = this._fft.createComplexArray();
-    }
-
-    _createHannWindow(n) {
-        const w = new Float32Array(n);
-        if (n <= 1) return w;
-        for (let i = 0; i < n; i++) {
-            w[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)));
-        }
-        return w;
-    }
-
-    setSampleRate(sampleRateHz) {
-        this.sampleRateHz = Math.max(1, sampleRateHz);
-    }
-
-    reset() {
-        this._index = 0;
-        this._filled = false;
-        this._samplesSeen = 0;
-        this._ring.fill(0);
-        this.lastFrequencyHz = 0;
-        this.lastPower = 0;
-    }
-
-    addSample(value) {
-        this._ensureFft();
-
-        this._ring[this._index] = value;
-        this._index = (this._index + 1) % this.fftSize;
-        if (this._index === 0) this._filled = true;
-
-        this._samplesSeen++;
-        if (!this._filled) return null;
-        if (!this._fft) return null;
-        if (this._samplesSeen % this.updateEvery !== 0) return null;
-
-        // Copiar ring buffer en orden temporal
-        for (let i = 0; i < this.fftSize; i++) {
-            this._timeDomain[i] = this._ring[(this._index + i) % this.fftSize];
-        }
-
-        // Quitar DC y aplicar ventana Hann
-        let mean = 0;
-        for (let i = 0; i < this.fftSize; i++) mean += this._timeDomain[i];
-        mean /= this.fftSize;
-        for (let i = 0; i < this.fftSize; i++) {
-            this._timeDomain[i] = (this._timeDomain[i] - mean) * this._window[i];
-        }
-
-        this._fft.realTransform(this._out, this._timeDomain);
-
-        const binHz = this.sampleRateHz / this.fftSize;
-        const kMin = Math.max(1, Math.ceil(this.fMinHz / binHz));
-        const kMax = Math.min(Math.floor(this.fftSize / 2), Math.floor(this.fMaxHz / binHz));
-        if (kMax <= kMin) return null;
-
-        let bestK = kMin;
-        let bestMag2 = -Infinity;
-        for (let k = kMin; k <= kMax; k++) {
-            const re = this._out[2 * k];
-            const im = this._out[2 * k + 1];
-            const mag2 = re * re + im * im;
-            if (mag2 > bestMag2) {
-                bestMag2 = mag2;
-                bestK = k;
-            }
-        }
-
-        const freqHz = bestK * binHz;
-        const smoothedHz = this.lastFrequencyHz
-            ? (this.smoothingAlpha * freqHz + (1 - this.smoothingAlpha) * this.lastFrequencyHz)
-            : freqHz;
-
-        this.lastFrequencyHz = smoothedHz;
-        this.lastPower = bestMag2;
-        return { frequencyHz: smoothedHz, power: bestMag2 };
-    }
-}
-
 // Calibrador automático de umbrales
 class AutoCalibrator {
     constructor() {
         this.repsData = [];
         this.isCalibrating = false;
         this.repCount = 0;
-        this.targetReps = CALIBRATION_TARGET_REPS;
-        this.currentRepData = {
+        this.targetReps = 5;
+        this.currentRepPeaks = {
             maxZ: -Infinity,
             minZ: Infinity,
-            zValues: [],
-            startTime: null
+            zValues: []
         };
-        this.state = 'IDLE'; // IDLE, MOVING, COOLDOWN
-        this.lastTransitionTime = 0;
+        this.inRep = false;
     }
 
-    startCalibration() {
+    startCalibration(targetReps = 5) {
         this.isCalibrating = true;
         this.repsData = [];
         this.repCount = 0;
-        this.currentRepData = {
+        this.targetReps = targetReps;
+        this.currentRepPeaks = {
             maxZ: -Infinity,
             minZ: Infinity,
-            zValues: [],
-            startTime: null
+            zValues: []
         };
-        this.state = 'IDLE';
-        this.lastTransitionTime = Date.now();
+        this.inRep = false;
     }
 
-    processValue(z, timestamp) {
+    processValue(z) {
         if (!this.isCalibrating) return null;
 
-        const absZ = Math.abs(z);
-        
-        switch (this.state) {
-            case 'IDLE':
-                // Detectar inicio de movimiento significativo
-                if (absZ > 0.6) {
-                    this.state = 'MOVING';
-                    this.currentRepData = {
-                        maxZ: z,
-                        minZ: z,
-                        zValues: [z],
-                        startTime: timestamp
-                    };
+        // Detectar si estamos en una repetición (movimiento significativo)
+        if (Math.abs(z) > 0.5 && !this.inRep) {
+            this.inRep = true;
+            this.currentRepPeaks = {
+                maxZ: z,
+                minZ: z,
+                zValues: [z]
+            };
+        } else if (this.inRep) {
+            this.currentRepPeaks.zValues.push(z);
+            this.currentRepPeaks.maxZ = Math.max(this.currentRepPeaks.maxZ, z);
+            this.currentRepPeaks.minZ = Math.min(this.currentRepPeaks.minZ, z);
+
+            // Detectar fin de repetición (vuelta a estable)
+            if (Math.abs(z) < 0.2 && this.currentRepPeaks.zValues.length > 20) {
+                this.repsData.push({
+                    maxZ: this.currentRepPeaks.maxZ,
+                    minZ: this.currentRepPeaks.minZ,
+                    amplitude: this.currentRepPeaks.maxZ - this.currentRepPeaks.minZ,
+                    variance: this.calculateVariance(this.currentRepPeaks.zValues)
+                });
+
+                this.repCount++;
+                this.inRep = false;
+
+                if (this.repCount >= this.targetReps) {
+                    return this.calculateThresholds();
                 }
-                break;
 
-            case 'MOVING':
-                // Acumular datos del movimiento
-                this.currentRepData.zValues.push(z);
-                this.currentRepData.maxZ = Math.max(this.currentRepData.maxZ, z);
-                this.currentRepData.minZ = Math.min(this.currentRepData.minZ, z);
-
-                // Detectar fin de movimiento (vuelta a estable)
-                if (absZ < 0.3 && this.currentRepData.zValues.length > 15) {
-                    const duration = timestamp - this.currentRepData.startTime;
-                    const amplitude = this.currentRepData.maxZ - this.currentRepData.minZ;
-
-                    // Validar que sea una repetición válida
-                    if (duration >= 500 && duration <= 5000 && amplitude >= 0.8) {
-                        this.repsData.push({
-                            maxZ: this.currentRepData.maxZ,
-                            minZ: this.currentRepData.minZ,
-                            amplitude: amplitude,
-                            duration: duration,
-                            variance: this.calculateVariance(this.currentRepData.zValues)
-                        });
-
-                        this.repCount++;
-                        console.log(`Calibration rep ${this.repCount}/${this.targetReps} detected - Amplitude: ${amplitude.toFixed(2)}`);
-
-                        if (this.repCount >= this.targetReps) {
-                            return this.calculateThresholds();
-                        }
-                    }
-
-                    this.state = 'COOLDOWN';
-                    this.lastTransitionTime = timestamp;
-                }
-                break;
-
-            case 'COOLDOWN':
-                // Esperar 500ms antes de detectar otra rep
-                if (timestamp - this.lastTransitionTime > 500) {
-                    this.state = 'IDLE';
-                }
-                break;
+                return { repCount: this.repCount, targetReps: this.targetReps };
+            }
+        } else if (Math.abs(z) < 0.2) {
+            // Mantener estable
+            this.inRep = false;
         }
 
         return { repCount: this.repCount, targetReps: this.targetReps };
@@ -270,19 +125,17 @@ class AutoCalibrator {
             minZValues.reduce((sum, val) => sum + Math.pow(val - avgMinZ, 2), 0) / minZValues.length
         );
 
-        // Crear nuevos umbrales basados en estadísticas (más conservadores)
+        // Crear nuevos umbrales basados en estadísticas
         const thresholds = {
-            upwardAcceleration: Math.max(0.4, avgMaxZ - stdMaxZ * 0.8),
-            downwardAcceleration: Math.min(-0.3, avgMinZ + stdMinZ * 0.8),
-            minAmplitude: avgAmplitude * 0.6,
-            minRepDuration: 700,
+            upwardAcceleration: Math.max(0.5, avgMaxZ - stdMaxZ * 0.5),
+            downwardAcceleration: Math.min(-0.3, avgMinZ + stdMinZ * 0.5),
+            minAmplitude: avgAmplitude * 0.7, // 70% de amplitud promedio
+            minRepDuration: 600,
             maxRepDuration: 5000,
             stableThreshold: 0.25
         };
 
         this.isCalibrating = false;
-
-        console.log('Calibration completed:', thresholds);
 
         return {
             success: true,
@@ -291,7 +144,9 @@ class AutoCalibrator {
                 repsDetected: this.repsData.length,
                 avgMaxZ,
                 avgMinZ,
-                avgAmplitude
+                avgAmplitude,
+                stdMaxZ,
+                stdMinZ
             }
         };
     }
@@ -308,7 +163,7 @@ class AutoCalibrator {
 // Detector de repeticiones con máquina de estados
 class RepDetector {
     constructor(customThresholds = null) {
-        this.state = 'IDLE';
+        this.state = 'IDLE'; // IDLE, PULLING_UP, AT_TOP, LOWERING
         this.repCount = 0;
         this.currentRepStartTime = null;
         this.currentRepData = {
@@ -318,64 +173,82 @@ class RepDetector {
             duration: 0
         };
 
+        // Umbrales por defecto
         const defaultThresholds = {
-            upwardAcceleration: 0.7,
-            downwardAcceleration: -0.5,
-            minRepDuration: 700,
-            maxRepDuration: 5000,
-            stableThreshold: 0.25,
-            minAmplitude: 0.9
+            upwardAcceleration: 0.8,      // m/s² para detectar inicio de subida
+            downwardAcceleration: -0.6,   // m/s² para detectar inicio de bajada
+            minPeakValue: 0.4,            // valor mínimo en el pico
+            minRepDuration: 800,          // ms - duración mínima de una rep
+            maxRepDuration: 5000,         // ms - duración máxima de una rep
+            stableThreshold: 0.3,         // umbral para considerar posición estable
+            minAmplitude: 1.0             // amplitud mínima
         };
 
+        // Usar umbrales personalizados si se proporcionan
         this.thresholds = customThresholds ? { ...defaultThresholds, ...customThresholds } : defaultThresholds;
+
         this.lastQuality = 0;
         this.lastRepTime = 0;
-        this.cooldownPeriod = 400;
+        this.cooldownPeriod = 300; // ms entre reps para evitar duplicados
     }
 
     setThresholds(thresholds) {
         this.thresholds = { ...this.thresholds, ...thresholds };
-        console.log('Thresholds updated:', this.thresholds);
     }
 
     processAcceleration(z, timestamp) {
+        const smoothedZ = z;
+
+        // Almacenar valores para calcular calidad
         if (this.state !== 'IDLE') {
-            this.currentRepData.zValues.push(z);
-            this.currentRepData.maxZ = Math.max(this.currentRepData.maxZ, z);
-            this.currentRepData.minZ = Math.min(this.currentRepData.minZ, z);
+            this.currentRepData.zValues.push(smoothedZ);
+            this.currentRepData.maxZ = Math.max(this.currentRepData.maxZ, smoothedZ);
+            this.currentRepData.minZ = Math.min(this.currentRepData.minZ, smoothedZ);
         }
 
+        // Máquina de estados
         switch (this.state) {
             case 'IDLE':
-                if (z > this.thresholds.upwardAcceleration) {
+                // Detectar inicio de movimiento hacia arriba
+                if (smoothedZ > this.thresholds.upwardAcceleration) {
                     this.state = 'PULLING_UP';
                     this.currentRepStartTime = timestamp;
                     this.currentRepData = {
-                        maxZ: z,
-                        minZ: z,
-                        zValues: [z],
+                        maxZ: smoothedZ,
+                        minZ: smoothedZ,
+                        zValues: [smoothedZ],
                         duration: 0
                     };
                 }
                 break;
 
             case 'PULLING_UP':
-                if (z < this.thresholds.stableThreshold && z > this.thresholds.downwardAcceleration) {
+                // Detectar llegada al punto alto (desaceleración)
+                if (smoothedZ < this.thresholds.stableThreshold &&
+                    smoothedZ > this.thresholds.downwardAcceleration) {
                     this.state = 'AT_TOP';
                 }
                 break;
 
             case 'AT_TOP':
-                if (z < this.thresholds.downwardAcceleration) {
+                // Detectar inicio de descenso
+                if (smoothedZ < this.thresholds.downwardAcceleration) {
                     this.state = 'LOWERING';
-                } else if (z > this.thresholds.upwardAcceleration) {
+                }
+                // Si vuelve a subir, regresar a PULLING_UP
+                else if (smoothedZ > this.thresholds.upwardAcceleration) {
                     this.state = 'PULLING_UP';
                 }
                 break;
 
             case 'LOWERING':
-                if (z > this.thresholds.downwardAcceleration && z < this.thresholds.upwardAcceleration) {
+                // Detectar llegada al punto bajo (vuelta a estable)
+                if (smoothedZ > this.thresholds.downwardAcceleration &&
+                    smoothedZ < this.thresholds.upwardAcceleration) {
+                    // Verificar duración de la rep
                     this.currentRepData.duration = timestamp - this.currentRepStartTime;
+
+                    // Verificar cooldown y validez
                     const timeSinceLastRep = timestamp - this.lastRepTime;
                     const amplitude = this.currentRepData.maxZ - this.currentRepData.minZ;
 
@@ -383,8 +256,10 @@ class RepDetector {
                         this.currentRepData.duration <= this.thresholds.maxRepDuration &&
                         amplitude >= this.thresholds.minAmplitude &&
                         timeSinceLastRep >= this.cooldownPeriod) {
+                        // Rep válida completada
                         this.completeRep(timestamp);
                     }
+
                     this.state = 'IDLE';
                 }
                 break;
@@ -400,9 +275,11 @@ class RepDetector {
     completeRep(timestamp) {
         this.repCount++;
         this.lastRepTime = timestamp;
+
+        // Calcular calidad de la repetición
         this.lastQuality = this.calculateRepQuality();
-        console.log(`Rep ${this.repCount} completed - Quality: ${this.lastQuality}%`);
-        
+
+        // Resetear datos de la rep actual
         this.currentRepData = {
             maxZ: -Infinity,
             minZ: Infinity,
@@ -413,21 +290,34 @@ class RepDetector {
 
     calculateRepQuality() {
         let quality = 100;
+
+        // Penalizar si la duración es muy corta o muy larga
         const duration = this.currentRepData.duration;
-        const idealDuration = 2000;
+        const idealDuration = 2000; // 2 segundos
         const durationDiff = Math.abs(duration - idealDuration);
 
-        if (durationDiff > 1000) quality -= 15;
-        else if (durationDiff > 500) quality -= 8;
+        if (durationDiff > 1000) {
+            quality -= 15;
+        } else if (durationDiff > 500) {
+            quality -= 8;
+        }
 
+        // Penalizar si el rango de movimiento es pequeño
         const range = this.currentRepData.maxZ - this.currentRepData.minZ;
-        if (range < 1.0) quality -= 20;
-        else if (range < 1.5) quality -= 10;
+        if (range < 1.0) {
+            quality -= 20;
+        } else if (range < 1.5) {
+            quality -= 10;
+        }
 
+        // Calcular suavidad del movimiento (menor varianza = mejor)
         if (this.currentRepData.zValues.length > 2) {
             const variance = this.calculateVariance(this.currentRepData.zValues);
-            if (variance > 1.5) quality -= 15;
-            else if (variance > 0.8) quality -= 8;
+            if (variance > 1.5) {
+                quality -= 15;
+            } else if (variance > 0.8) {
+                quality -= 8;
+            }
         }
 
         return Math.max(0, Math.min(100, quality));
@@ -453,7 +343,12 @@ class RepDetector {
         this.state = 'IDLE';
         this.repCount = 0;
         this.currentRepStartTime = null;
-        this.currentRepData = { maxZ: -Infinity, minZ: Infinity, zValues: [], duration: 0 };
+        this.currentRepData = {
+            maxZ: -Infinity,
+            minZ: Infinity,
+            zValues: [],
+            duration: 0
+        };
         this.lastQuality = 0;
         this.lastRepTime = 0;
     }
@@ -475,7 +370,6 @@ const toggleY = document.getElementById('toggleY');
 const toggleZ = document.getElementById('toggleZ');
 const repCountEl = document.getElementById('repCount');
 const repPhaseEl = document.getElementById('repPhase');
-const cadenceValueEl = document.getElementById('cadenceValue');
 
 // Elementos del panel de calibración
 const calibrationPanel = document.getElementById('calibrationPanel');
@@ -489,36 +383,28 @@ const thresholdAmplitude = document.getElementById('thresholdAmplitude');
 const closeCalibrateBtn = document.getElementById('closeCalibrateBtn');
 const applyCalibrateBtn = document.getElementById('applyCalibrateBtn');
 
-// ========================================
-// VARIABLES GLOBALES
-// ========================================
-
+// Variables de estado
 let isRunning = false;
 let isCalibrating = false;
 let chart = null;
 let intensityGauge = null;
 let qualityGauge = null;
 
+// Instancias de detección
 let axisFilter = new MovingAverageFilter(5);
 let repDetector = new RepDetector();
 let autoCalibrator = new AutoCalibrator();
-let detectedAxis = 'y';
+let detectedAxis = 'y'; // Eje vertical detectado: 'x', 'y', o 'z'
+
+// Umbrales calibrados (almacenados)
 let calibratedThresholds = null;
 
-let monitoringStatusBase = '';
-
-let samplingInterval = 33;
+// Control de frecuencia de muestreo
+let samplingInterval = 33; // ms (30 Hz por defecto)
 let lastSampleTime = 0;
 
-let cadenceEstimator = new FFTCadenceEstimator({
-    fftSize: 256,
-    sampleRateHz: Math.round(1000 / samplingInterval),
-    fMinHz: 0.2,
-    fMaxHz: 5.0,
-    updateEvery: 6,
-    smoothingAlpha: 0.35
-});
-
+// Configuración de datos
+const MAX_DATA_POINTS = 100;
 const dataPoints = {
     labels: [],
     x: [],
@@ -530,13 +416,10 @@ const dataPoints = {
 // INICIALIZACIÓN DE GRÁFICAS
 // ========================================
 
+// Inicializar gráfica de Chart.js (línea temporal)
 function initChart() {
-    if (!chartCanvas) {
-        console.error('Canvas element not found');
-        return;
-    }
-
     const ctx = chartCanvas.getContext('2d');
+
     chart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -600,19 +483,18 @@ function initChart() {
             }
         }
     });
-    console.log('Chart initialized');
 }
 
+// Inicializar gauge de intensidad (ApexCharts)
 function initIntensityGauge() {
-    const gaugeEl = document.querySelector('#intensityGauge');
-    if (!gaugeEl) return;
-
     const options = {
         series: [0],
         chart: {
             type: 'radialBar',
             height: 220,
-            sparkline: { enabled: true }
+            sparkline: {
+                enabled: true
+            }
         },
         plotOptions: {
             radialBar: {
@@ -632,7 +514,9 @@ function initIntensityGauge() {
                     }
                 },
                 dataLabels: {
-                    name: { show: false },
+                    name: {
+                        show: false
+                    },
                     value: {
                         offsetY: -2,
                         fontSize: '22px',
@@ -659,20 +543,20 @@ function initIntensityGauge() {
         labels: ['Intensidad']
     };
 
-    intensityGauge = new ApexCharts(gaugeEl, options);
+    intensityGauge = new ApexCharts(document.querySelector('#intensityGauge'), options);
     intensityGauge.render();
 }
 
+// Inicializar gauge de calidad (ApexCharts)
 function initQualityGauge() {
-    const gaugeEl = document.querySelector('#qualityGauge');
-    if (!gaugeEl) return;
-
     const options = {
         series: [0],
         chart: {
             type: 'radialBar',
             height: 220,
-            sparkline: { enabled: true }
+            sparkline: {
+                enabled: true
+            }
         },
         plotOptions: {
             radialBar: {
@@ -692,7 +576,9 @@ function initQualityGauge() {
                     }
                 },
                 dataLabels: {
-                    name: { show: false },
+                    name: {
+                        show: false
+                    },
                     value: {
                         offsetY: -2,
                         fontSize: '22px',
@@ -719,14 +605,11 @@ function initQualityGauge() {
         labels: ['Calidad']
     };
 
-    qualityGauge = new ApexCharts(gaugeEl, options);
+    qualityGauge = new ApexCharts(document.querySelector('#qualityGauge'), options);
     qualityGauge.render();
 }
 
-// ========================================
-// FUNCIONES DE ACTUALIZACIÓN
-// ========================================
-
+// Actualizar datos de la gráfica
 function updateChart(x, y, z) {
     const timestamp = dataPoints.labels.length;
 
@@ -735,6 +618,7 @@ function updateChart(x, y, z) {
     dataPoints.y.push(y);
     dataPoints.z.push(z);
 
+    // Mantener solo los últimos MAX_DATA_POINTS puntos
     if (dataPoints.labels.length > MAX_DATA_POINTS) {
         dataPoints.labels.shift();
         dataPoints.x.shift();
@@ -743,10 +627,11 @@ function updateChart(x, y, z) {
     }
 
     if (chart) {
-        chart.update('none');
+        chart.update('none'); // 'none' mode para mejor rendimiento
     }
 }
 
+// Controlar visibilidad de ejes en la gráfica
 function toggleAxisVisibility(axisIndex, isVisible) {
     if (chart) {
         chart.data.datasets[axisIndex].hidden = !isVisible;
@@ -754,39 +639,223 @@ function toggleAxisVisibility(axisIndex, isVisible) {
     }
 }
 
+// Actualizar valores en pantalla
 function updateValues(x, y, z) {
     xValue.textContent = x.toFixed(2);
     yValue.textContent = y.toFixed(2);
     zValue.textContent = z.toFixed(2);
 }
 
+// ========================================
+// FUNCIONES DE ACTUALIZACIÓN
+// ========================================
+
+// Actualizar contador de repeticiones con animación
 function updateRepCounter(count) {
     const prevCount = parseInt(repCountEl.textContent);
     if (count > prevCount) {
         repCountEl.classList.add('pulse');
-        setTimeout(() => repCountEl.classList.remove('pulse'), 400);
+        setTimeout(() => {
+            repCountEl.classList.remove('pulse');
+        }, 400);
     }
     repCountEl.textContent = count;
 }
 
+// Actualizar fase del ejercicio
 function updatePhase(phase) {
     repPhaseEl.textContent = phase;
 }
 
+// Actualizar gauge de intensidad
 function updateIntensityGauge(axisValue) {
     if (!intensityGauge) return;
+
+    // Mapear valor del eje (-3 a 3) a porcentaje (0-100)
+    // Usamos el valor absoluto para mostrar intensidad sin importar dirección
     const absValue = Math.abs(axisValue);
     const percentage = Math.min(100, (absValue / 3) * 100);
+
     intensityGauge.updateSeries([percentage]);
 }
 
+// Actualizar gauge de calidad
 function updateQualityGauge(quality) {
     if (!qualityGauge) return;
     qualityGauge.updateSeries([quality]);
 }
 
+// Manejar evento de movimiento del dispositivo
+function handleMotion(event) {
+    if (!isRunning) return;
+
+    // Throttling basado en tiempo
+    const now = Date.now();
+    if (now - lastSampleTime < samplingInterval) {
+        return; // Ignorar este evento
+    }
+    lastSampleTime = now;
+
+    // Log solo la primera vez para debug
+    if (dataPoints.labels.length === 0) {
+        console.log('Primer evento devicemotion recibido:', event);
+        console.log('Acceleration:', event.acceleration);
+        console.log('AccelerationIncludingGravity:', event.accelerationIncludingGravity);
+    }
+
+    // Usar acceleration (sin gravedad) en lugar de accelerationIncludingGravity
+    const acc = event.acceleration;
+
+    // Si acceleration no está disponible, intentar con accelerationIncludingGravity
+    if (!acc || (acc.x === null && acc.y === null && acc.z === null)) {
+        const accWithGravity = event.accelerationIncludingGravity;
+        if (accWithGravity && (accWithGravity.x !== null || accWithGravity.y !== null || accWithGravity.z !== null)) {
+            const x = accWithGravity.x || 0;
+            const y = accWithGravity.y || 0;
+            const z = accWithGravity.z || 0;
+
+            processAccelerationData(x, y, z);
+        } else {
+            console.warn('No hay datos de aceleración disponibles');
+        }
+        return;
+    }
+
+    if (acc && acc.x !== null && acc.y !== null && acc.z !== null) {
+        const x = acc.x || 0;
+        const y = acc.y || 0;
+        const z = acc.z || 0;
+
+        processAccelerationData(x, y, z);
+    }
+}
+
+// Procesar datos de aceleración (nueva función centralizada)
+function processAccelerationData(x, y, z) {
+    // Actualizar valores en pantalla
+    updateValues(x, y, z);
+
+    // Actualizar gráfica temporal
+    updateChart(x, y, z);
+
+    // Seleccionar valor del eje detectado como vertical
+    let axisValue;
+    switch(detectedAxis) {
+        case 'x': axisValue = x; break;
+        case 'y': axisValue = y; break;
+        case 'z': axisValue = z; break;
+        default: axisValue = y;
+    }
+
+    // Aplicar filtro de suavizado
+    const smoothed = axisFilter.addValue(axisValue);
+
+    // Debug: mostrar valores
+    if (dataPoints.labels.length % 20 === 0) {
+        console.log(`${detectedAxis.toUpperCase()} raw:`, axisValue.toFixed(2), 'smoothed:', smoothed.toFixed(2));
+    }
+
+    // Procesar detección de repeticiones
+    const timestamp = Date.now();
+    const repResult = repDetector.processAcceleration(smoothed, timestamp);
+
+    // Actualizar UI con resultados
+    updateRepCounter(repResult.repCount);
+    updatePhase(repDetector.getPhaseText());
+    updateIntensityGauge(smoothed);
+
+    // Actualizar calidad solo cuando hay una calidad válida
+    if (repResult.quality > 0) {
+        updateQualityGauge(repResult.quality);
+    }
+}
+
+// Detectar eje vertical automáticamente usando gravedad
+function detectVerticalAxis(statusElement) {
+    return new Promise((resolve) => {
+        let samplesCollected = 0;
+        const samples = { x: [], y: [], z: [] };
+        const SAMPLES_NEEDED = 5;
+
+        const handler = (event) => {
+            const acc = event.accelerationIncludingGravity;
+            if (!acc || acc.x === null || acc.y === null || acc.z === null) {
+                return;
+            }
+
+            // Recolectar muestras
+            samples.x.push(Math.abs(acc.x));
+            samples.y.push(Math.abs(acc.y));
+            samples.z.push(Math.abs(acc.z));
+            samplesCollected++;
+
+            // Mostrar progreso
+            statusElement.textContent = 'Detectando... (' + samplesCollected + '/' + SAMPLES_NEEDED + ')';
+
+            if (samplesCollected >= SAMPLES_NEEDED) {
+                // Calcular promedios
+                const avgX = samples.x.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+                const avgY = samples.y.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+                const avgZ = samples.z.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
+
+                // Mostrar valores detectados
+                statusElement.textContent = 'X:' + avgX.toFixed(1) + ' Y:' + avgY.toFixed(1) + ' Z:' + avgZ.toFixed(1);
+
+                // El eje con mayor gravedad es el vertical
+                let verticalAxis;
+                if (avgX >= avgY && avgX >= avgZ) {
+                    verticalAxis = 'x';
+                } else if (avgY >= avgX && avgY >= avgZ) {
+                    verticalAxis = 'y';
+                } else {
+                    verticalAxis = 'z';
+                }
+
+                console.log('Gravedad detectada - X:', avgX.toFixed(2), 'Y:', avgY.toFixed(2), 'Z:', avgZ.toFixed(2));
+                console.log('Eje vertical detectado:', verticalAxis.toUpperCase());
+
+                window.removeEventListener('devicemotion', handler);
+                resolve(verticalAxis);
+            }
+        };
+
+        window.addEventListener('devicemotion', handler);
+
+        // Timeout de seguridad (2 segundos)
+        setTimeout(() => {
+            window.removeEventListener('devicemotion', handler);
+            console.log('Timeout en detección, usando eje Y por defecto');
+            statusElement.textContent = 'Timeout - usando Y por defecto';
+            resolve('y');
+        }, 2000);
+    });
+}
+
+// Solicitar permisos (necesario para iOS 13+)
+async function requestPermission() {
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+            const permission = await DeviceMotionEvent.requestPermission();
+            console.log('Permiso de DeviceMotion:', permission);
+            if (permission === 'granted') {
+                return true;
+            } else {
+                status.textContent = 'Permiso denegado. Por favor, permite el acceso al acelerómetro en la configuración de tu navegador.';
+                status.className = 'status error';
+                return false;
+            }
+        } catch (error) {
+            console.error('Error al solicitar permisos:', error);
+            status.textContent = 'Error al solicitar permisos: ' + error.message;
+            status.className = 'status error';
+            return false;
+        }
+    }
+    return true; // No requiere permisos explícitos
+}
+
 // ========================================
-// CALIBRACIÓN
+// FUNCIONES DE CALIBRACIÓN
 // ========================================
 
 function showCalibrationPanel() {
@@ -802,65 +871,99 @@ function updateCalibrationProgress() {
     progressBar.style.width = progress + '%';
     const repsDetected = autoCalibrator.repCount;
     const repsTarget = autoCalibrator.targetReps;
-    progressText.textContent = `Repetición ${repsDetected}/${repsTarget}`;
+    progressText.textContent = `Repetición ${repsDetected}/${repsTarget} detectada`;
 }
 
 async function startCalibration() {
+    // Verificar soporte
     if (!window.DeviceMotionEvent) {
         status.textContent = 'Tu dispositivo no soporta el acelerómetro';
         status.className = 'status error';
         return;
     }
 
+    // Solicitar permisos
     const hasPermission = await requestPermission();
     if (!hasPermission) return;
 
+    // Detectar eje vertical automáticamente
     status.textContent = 'Detectando orientación...';
     status.className = 'status';
     detectedAxis = await detectVerticalAxis(status);
 
+    // Mostrar panel de calibración
     showCalibrationPanel();
-    calibrationStatus.textContent = 'Realiza 5 repeticiones completas y controladas. La calibración comenzará automáticamente.';
+    calibrationStatus.textContent = 'Realiza 5 repeticiones completas para calibrar automáticamente. Presiona Iniciar cuando estés listo.';
     progressText.textContent = 'Esperando inicio...';
-    progressBar.style.width = '0%';
     calibrationResults.classList.add('hidden');
     applyCalibrateBtn.classList.add('hidden');
 
-    autoCalibrator.startCalibration();
+    // Inicializar calibrador
+    autoCalibrator.startCalibration(5);
+
+    // Resetear datos
     axisFilter.reset();
-    cadenceEstimator.reset();
-    if (cadenceValueEl) cadenceValueEl.textContent = '--';
     dataPoints.labels = [];
     dataPoints.x = [];
     dataPoints.y = [];
     dataPoints.z = [];
 
+    // Empezar a capturar datos
     isCalibrating = true;
     isRunning = true;
-    startBtn.textContent = 'Detener Calibración';
+    startBtn.textContent = 'Detener';
     startBtn.classList.add('active');
 
-    console.log('Starting calibration...');
+    console.log('Iniciando calibración...');
     window.addEventListener('devicemotion', handleMotionCalibration);
+
+    // Timeout para verificar datos
+    setTimeout(() => {
+        if (dataPoints.labels.length === 0) {
+            calibrationStatus.textContent = 'No se están recibiendo datos del acelerómetro. Verifica los permisos.';
+        }
+    }, 3000);
 }
 
 function handleMotionCalibration(event) {
     if (!isCalibrating) return;
 
+    // Throttling basado en tiempo
     const now = Date.now();
-    if (now - lastSampleTime < samplingInterval) return;
+    if (now - lastSampleTime < samplingInterval) {
+        return;
+    }
     lastSampleTime = now;
 
-    const acc = event.acceleration || event.accelerationIncludingGravity;
-    if (!acc || (acc.x === null && acc.y === null && acc.z === null)) return;
+    // Obtener datos de aceleración
+    const acc = event.acceleration;
 
-    const x = acc.x || 0;
-    const y = acc.y || 0;
-    const z = acc.z || 0;
+    if (!acc || (acc.x === null && acc.y === null && acc.z === null)) {
+        const accWithGravity = event.accelerationIncludingGravity;
+        if (accWithGravity && (accWithGravity.x !== null || accWithGravity.y !== null || accWithGravity.z !== null)) {
+            const x = accWithGravity.x || 0;
+            const y = accWithGravity.y || 0;
+            const z = accWithGravity.z || 0;
 
+            calibrationProcessData(x, y, z);
+        }
+        return;
+    }
+
+    if (acc && acc.x !== null && acc.y !== null && acc.z !== null) {
+        const x = acc.x || 0;
+        const y = acc.y || 0;
+        const z = acc.z || 0;
+
+        calibrationProcessData(x, y, z);
+    }
+}
+
+function calibrationProcessData(x, y, z) {
+    // Actualizar gráfica
     updateChart(x, y, z);
-    updateValues(x, y, z);
 
+    // Seleccionar eje
     let axisValue;
     switch(detectedAxis) {
         case 'x': axisValue = x; break;
@@ -869,12 +972,16 @@ function handleMotionCalibration(event) {
         default: axisValue = y;
     }
 
+    // Aplicar filtro
     const smoothed = axisFilter.addValue(axisValue);
-    const result = autoCalibrator.processValue(smoothed, now);
+
+    // Procesar calibración
+    const result = autoCalibrator.processValue(smoothed);
 
     if (result && result.repCount !== undefined) {
         updateCalibrationProgress();
 
+        // Si la calibración está completa
         if (result.thresholds) {
             completeCalibration(result);
         }
@@ -886,193 +993,101 @@ function completeCalibration(result) {
     isRunning = false;
     window.removeEventListener('devicemotion', handleMotionCalibration);
 
+    // Guardar umbrales calibrados
     calibratedThresholds = result.thresholds;
     localStorage.setItem('calibratedThresholds', JSON.stringify(calibratedThresholds));
     localStorage.setItem('calibrationDate', new Date().toISOString());
 
+    // Mostrar resultados
     calibrationStatus.textContent = '✓ ¡Calibración completada!';
     progressBar.style.width = '100%';
-    progressText.textContent = `${result.stats.repsDetected} repeticiones analizadas`;
+    progressText.textContent = 'Umbrales calibrados correctamente';
 
-    thresholdUp.textContent = result.thresholds.upwardAcceleration.toFixed(2) + ' m/s²';
-    thresholdDown.textContent = result.thresholds.downwardAcceleration.toFixed(2) + ' m/s²';
-    thresholdAmplitude.textContent = result.thresholds.minAmplitude.toFixed(2) + ' m/s²';
+    // Mostrar valores de umbrales
+    thresholdUp.textContent = result.thresholds.upwardAcceleration.toFixed(3);
+    thresholdDown.textContent = result.thresholds.downwardAcceleration.toFixed(3);
+    thresholdAmplitude.textContent = result.thresholds.minAmplitude.toFixed(3);
 
     calibrationResults.classList.remove('hidden');
     applyCalibrateBtn.classList.remove('hidden');
 
-    startBtn.textContent = 'Iniciar';
-    startBtn.classList.remove('active');
+    console.log('Calibración completada:', result.thresholds);
 }
 
 // ========================================
-// DETECCIÓN Y MONITOREO
+// FUNCIONES DE UTILIDAD
 // ========================================
 
-function handleMotion(event) {
-    if (!isRunning || isCalibrating) return;
-
-    const now = Date.now();
-    if (now - lastSampleTime < samplingInterval) return;
-    lastSampleTime = now;
-
-    const acc = event.acceleration || event.accelerationIncludingGravity;
-    if (!acc || (acc.x === null && acc.y === null && acc.z === null)) return;
-
-    const x = acc.x || 0;
-    const y = acc.y || 0;
-    const z = acc.z || 0;
-
-    updateValues(x, y, z);
-    updateChart(x, y, z);
-
-    let axisValue;
-    switch(detectedAxis) {
-        case 'x': axisValue = x; break;
-        case 'y': axisValue = y; break;
-        case 'z': axisValue = z; break;
-        default: axisValue = y;
-    }
-
-    const smoothed = axisFilter.addValue(axisValue);
-
-    // Estimar cadencia por FFT (mostrar en campo fijo)
-    const cadence = cadenceEstimator.addSample(smoothed);
-    if (cadence && cadenceValueEl) {
-        const rpm = cadence.frequencyHz * 60;
-        cadenceValueEl.textContent = rpm.toFixed(0);
-    }
-
-    const repResult = repDetector.processAcceleration(smoothed, now);
-
-    updateRepCounter(repResult.repCount);
-    updatePhase(repDetector.getPhaseText());
-    updateIntensityGauge(smoothed);
-
-    if (repResult.quality > 0) {
-        updateQualityGauge(repResult.quality);
-    }
-}
-
-function detectVerticalAxis(statusElement) {
-    return new Promise((resolve) => {
-        let samplesCollected = 0;
-        const samples = { x: [], y: [], z: [] };
-        const SAMPLES_NEEDED = 5;
-
-        const handler = (event) => {
-            const acc = event.accelerationIncludingGravity;
-            if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
-
-            samples.x.push(Math.abs(acc.x));
-            samples.y.push(Math.abs(acc.y));
-            samples.z.push(Math.abs(acc.z));
-            samplesCollected++;
-
-            statusElement.textContent = `Detectando... (${samplesCollected}/${SAMPLES_NEEDED})`;
-
-            if (samplesCollected >= SAMPLES_NEEDED) {
-                const avgX = samples.x.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
-                const avgY = samples.y.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
-                const avgZ = samples.z.reduce((a, b) => a + b, 0) / SAMPLES_NEEDED;
-
-                let verticalAxis;
-                if (avgX >= avgY && avgX >= avgZ) verticalAxis = 'x';
-                else if (avgY >= avgX && avgY >= avgZ) verticalAxis = 'y';
-                else verticalAxis = 'z';
-
-                console.log(`Vertical axis detected: ${verticalAxis.toUpperCase()} (X:${avgX.toFixed(2)}, Y:${avgY.toFixed(2)}, Z:${avgZ.toFixed(2)})`);
-
-                window.removeEventListener('devicemotion', handler);
-                resolve(verticalAxis);
-            }
-        };
-
-        window.addEventListener('devicemotion', handler);
-
-        setTimeout(() => {
-            window.removeEventListener('devicemotion', handler);
-            console.log('Timeout - using Y as default');
-            resolve('y');
-        }, 2000);
-    });
-}
-
-async function requestPermission() {
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-        try {
-            const permission = await DeviceMotionEvent.requestPermission();
-            if (permission === 'granted') {
-                return true;
-            } else {
-                status.textContent = 'Permiso denegado';
-                status.className = 'status error';
-                return false;
-            }
-        } catch (error) {
-            console.error('Error requesting permission:', error);
-            status.textContent = 'Error al solicitar permisos: ' + error.message;
-            status.className = 'status error';
-            return false;
-        }
-    }
-    return true;
-}
 
 async function toggleMonitoring() {
     if (!isRunning) {
+        // Verificar soporte
         if (!window.DeviceMotionEvent) {
             status.textContent = 'Tu dispositivo no soporta el acelerómetro';
             status.className = 'status error';
             return;
         }
 
+        console.log('Tipo de DeviceMotionEvent:', typeof DeviceMotionEvent);
+        console.log('¿Tiene requestPermission?', typeof DeviceMotionEvent.requestPermission);
+
+        // Solicitar permisos
         const hasPermission = await requestPermission();
         if (!hasPermission) return;
 
+        // Detectar eje vertical automáticamente
         status.textContent = 'Detectando orientación...';
         status.className = 'status';
         detectedAxis = await detectVerticalAxis(status);
 
-        status.textContent = `Eje detectado: ${detectedAxis.toUpperCase()} ✓`;
+        // Mostrar resultado de detección
+        status.textContent = 'Eje detectado: ' + detectedAxis.toUpperCase() + ' ✓';
         status.className = 'status success';
 
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Esperar 2 segundos para que el usuario vea el resultado
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
+        // Resetear detectores
         axisFilter.reset();
         repDetector.reset();
-        cadenceEstimator.reset();
-        cadenceEstimator.setSampleRate(Math.round(1000 / samplingInterval));
-        if (cadenceValueEl) cadenceValueEl.textContent = '--';
 
+        // Aplicar umbrales calibrados si existen
         if (calibratedThresholds) {
             repDetector.setThresholds(calibratedThresholds);
-            monitoringStatusBase = `Monitoreando con calibración (Eje ${detectedAxis.toUpperCase()})`;
-            status.textContent = monitoringStatusBase;
+            status.textContent = 'Monitoreando con calibración personalizada (Eje ' + detectedAxis.toUpperCase() + ')';
         } else {
-            monitoringStatusBase = `Monitoreando (Eje ${detectedAxis.toUpperCase()})`;
-            status.textContent = monitoringStatusBase;
+            status.textContent = 'Monitoreando (Eje ' + detectedAxis.toUpperCase() + ')';
         }
 
         updateRepCounter(0);
         updatePhase('Listo');
         updateQualityGauge(0);
 
+        // Iniciar monitoreo
         isRunning = true;
         startBtn.textContent = 'Detener';
         startBtn.classList.add('active');
+        status.textContent = 'Monitoreando (Eje ' + detectedAxis.toUpperCase() + ')';
         status.className = 'status success';
 
+        console.log('Iniciando escucha de eventos devicemotion...');
         window.addEventListener('devicemotion', handleMotion);
+
+        // Timeout para verificar si recibimos datos
+        setTimeout(() => {
+            if (dataPoints.labels.length === 0) {
+                status.textContent = 'No se están recibiendo datos del acelerómetro. Verifica los permisos.';
+                status.className = 'status error';
+                console.warn('No se han recibido eventos de devicemotion después de 3 segundos');
+            }
+        }, 3000);
     } else {
+        // Detener monitoreo
         isRunning = false;
-        monitoringStatusBase = '';
         startBtn.textContent = 'Iniciar';
         startBtn.classList.remove('active');
         status.textContent = 'Detenido';
         status.className = 'status';
-
-        if (cadenceValueEl) cadenceValueEl.textContent = '--';
 
         window.removeEventListener('devicemotion', handleMotion);
     }
@@ -1083,33 +1098,36 @@ async function toggleMonitoring() {
 // ========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Cargar umbrales calibrados
+    // Cargar umbrales calibrados desde localStorage si existen
     const savedThresholds = localStorage.getItem('calibratedThresholds');
     if (savedThresholds) {
         try {
             calibratedThresholds = JSON.parse(savedThresholds);
             const calibrationDate = localStorage.getItem('calibrationDate');
-            console.log('Calibrated thresholds loaded. Date:', calibrationDate);
-            status.textContent = '✓ Calibración cargada';
+            console.log('Umbrales calibrados cargados. Fecha:', calibrationDate);
+            status.textContent = '✓ Umbrales calibrados cargados';
             status.className = 'status success';
         } catch (e) {
-            console.error('Error loading thresholds:', e);
+            console.error('Error al cargar umbrales:', e);
         }
     }
 
-    // Inicializar gráficas
+    // Inicializar todas las gráficas
     initChart();
     initIntensityGauge();
     initQualityGauge();
 
-    // Control de frecuencia
+    // Obtener referencias a elementos del control de frecuencia
     const samplingRateSlider = document.getElementById('samplingRate');
     const samplingRateValueEl = document.getElementById('samplingRateValue');
 
-    // Event listeners
+    // Event listener para botón de inicio/detener
     startBtn.addEventListener('click', toggleMonitoring);
+
+    // Event listener para botón de calibración
     calibrateBtn.addEventListener('click', startCalibration);
 
+    // Event listeners para controles del panel de calibración
     closeCalibrateBtn.addEventListener('click', () => {
         isCalibrating = false;
         isRunning = false;
@@ -1119,34 +1137,42 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.classList.remove('active');
         status.textContent = 'Calibración cancelada';
         status.className = 'status';
-
-        if (cadenceValueEl) cadenceValueEl.textContent = '--';
     });
 
     applyCalibrateBtn.addEventListener('click', () => {
         hideCalibrationPanel();
-        status.textContent = 'Calibración aplicada. Presiona Iniciar.';
+        status.textContent = 'Umbrales aplicados. Presiona Iniciar para empezar.';
         status.className = 'status success';
     });
 
-    toggleX.addEventListener('change', (e) => toggleAxisVisibility(0, e.target.checked));
-    toggleY.addEventListener('change', (e) => toggleAxisVisibility(1, e.target.checked));
-    toggleZ.addEventListener('change', (e) => toggleAxisVisibility(2, e.target.checked));
 
+    // Event listeners para los toggles de ejes
+    toggleX.addEventListener('change', (e) => {
+        toggleAxisVisibility(0, e.target.checked);
+    });
+
+    toggleY.addEventListener('change', (e) => {
+        toggleAxisVisibility(1, e.target.checked);
+    });
+
+    toggleZ.addEventListener('change', (e) => {
+        toggleAxisVisibility(2, e.target.checked);
+    });
+
+    // Event listener para control de frecuencia de muestreo
     samplingRateSlider.addEventListener('input', (e) => {
         const hz = parseInt(e.target.value);
-        samplingInterval = 1000 / hz;
+        samplingInterval = 1000 / hz; // Convertir Hz a ms
         samplingRateValueEl.textContent = hz + ' Hz';
-
-        cadenceEstimator.setSampleRate(hz);
+        console.log('Frecuencia de muestreo ajustada a', hz, 'Hz (', samplingInterval.toFixed(1), 'ms )');
     });
 
     // Registrar Service Worker
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('service-worker.js')
-            .then(() => console.log('Service Worker registered'))
-            .catch(err => console.error('Service Worker error:', err));
+            .then(() => console.log('Service Worker registrado'))
+            .catch(err => console.log('Error al registrar Service Worker:', err));
     }
 
-    console.log('Training Tracker initialized');
+    console.log('Training Tracker inicializado correctamente');
 });

@@ -1,12 +1,13 @@
-const CACHE_NAME = 'accelerometer-app-v7-clean';
+const CACHE_NAME = 'accelerometer-app-v9-cadence-ui';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/style.css?v=2025-12-13-1',
-  '/app.js?v=2025-12-13-2',
+  '/style.css?v=2025-12-13-2',
+  '/app.js?v=2025-12-13-4',
   '/manifest.json',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
-  'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js'
+  'https://cdn.jsdelivr.net/npm/apexcharts@3.45.1/dist/apexcharts.min.js',
+  'https://cdn.jsdelivr.net/npm/fft.js@4.0.4/lib/fft.min.js'
 ];
 
 // Instalación - cachear recursos
@@ -50,7 +51,8 @@ self.addEventListener('fetch', event => {
         // Si no está en cache, hacer fetch
         return fetch(event.request).then(response => {
           // Verificar si es una respuesta válida
-          if (!response || response.status !== 200 || response.type !== 'basic') {
+          // `basic` = same-origin, `cors` = CDN/terceros con CORS
+          if (!response || response.status !== 200 || (response.type !== 'basic' && response.type !== 'cors')) {
             return response;
           }
 
